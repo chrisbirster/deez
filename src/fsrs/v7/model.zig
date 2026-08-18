@@ -98,11 +98,11 @@ fn componentStability(
     const easy_bonus = if (rating == .easy) w[base + 8] else 1.0;
     const stability_increase = 1.0 +
         @exp(w[base] - 1.5) *
-        (11.0 - difficulty) *
-        std.math.pow(f64, stability, -w[base + 1]) *
-        (@exp(@min((1.0 - retention) * w[base + 2], 30.0)) - 1.0) *
-        hard_penalty *
-        easy_bonus;
+            (11.0 - difficulty) *
+            std.math.pow(f64, stability, -w[base + 1]) *
+            (@exp(@min((1.0 - retention) * w[base + 2], 30.0)) - 1.0) *
+            hard_penalty *
+            easy_bonus;
 
     return @max(post_lapse, stability * stability_increase);
 }
