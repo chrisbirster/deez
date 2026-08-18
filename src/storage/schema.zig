@@ -41,8 +41,8 @@ pub const migration_v1 =
     \\    id INTEGER PRIMARY KEY,
     \\    name TEXT NOT NULL UNIQUE,
     \\    group_id INTEGER NULL REFERENCES deck_groups(id) ON DELETE SET NULL,
-    \\    algorithm_family TEXT NULL,
-    \\    algorithm_major INTEGER NULL,
+    \\    algorithm_family TEXT NULL DEFAULT 'fsrs',
+    \\    algorithm_major INTEGER NULL DEFAULT 7,
     \\    parameter_set_id BLOB NULL REFERENCES parameter_sets(id),
     \\    created_at_ms INTEGER NOT NULL
     \\);
