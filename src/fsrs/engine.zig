@@ -12,8 +12,8 @@ pub const Engine = union(enum) {
         return .{ .fsrs7 = .{} };
     }
 
-    pub fn forAlgorithm(algorithm: AlgorithmId) !Engine {
-        if (algorithm.eql(.fsrs7)) return defaultFsrs7();
+    pub fn forAlgorithm(algorithm_id: AlgorithmId) !Engine {
+        if (algorithm_id.eql(.fsrs7)) return defaultFsrs7();
         return error.UnsupportedAlgorithm;
     }
 
