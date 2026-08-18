@@ -10,8 +10,7 @@ fn handle(db: *sqlite.Db) ?*c.sqlite3 {
 }
 
 pub fn copy(source: *sqlite.Db, destination: *sqlite.Db) !void {
-    const backup = c.sqlite3_backup_init(handle(destination), "main", handle(source), "main") orelse
-        return error.SqliteBackupInitFailed;
+    const backup = c.sqlite3_backup_init(handle(destination), "main", handle(source), "main") orelse return error.SqliteBackupInitFailed;
     defer _ = c.sqlite3_backup_finish(backup);
 
     const result = c.sqlite3_backup_step(backup, -1);
