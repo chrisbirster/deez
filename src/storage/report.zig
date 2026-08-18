@@ -40,7 +40,8 @@ pub const Report = struct {
 
     fn prepare(self: Report, sql: [:0]const u8) !*c.sqlite3_stmt {
         var stmt: ?*c.sqlite3_stmt = null;
-        if (c.sqlite3_prepare_v2(self.db.handle, sql.ptr, -1, &stmt, null) != c.SQLITE_OK or stmt == null) {
+        const db_handle: ?*c.sqlite3 = @ptrCast(self.db.handle);
+        if (c.sqlite3_prepare_v2(db_handle, sql.ptr, -1, &stmt, null) != c.SQLITE_OK or stmt == null) {
             return error.SqlitePrepareFailed;
         }
         return stmt.?;
