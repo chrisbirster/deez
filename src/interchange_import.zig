@@ -253,7 +253,7 @@ fn bindOptionalId(stmt: *c.sqlite3_stmt, index: c_int, text: []const u8) !void {
     }
 }
 
-fn importParameter(allocator: std.mem.Allocator, db: *storage.Db, fields: *std.mem.SplitIterator(u8, .scalar)) !void {
+fn importParameter(allocator: std.mem.Allocator, db: *storage.Db, fields: anytype) !void {
     var id = try decodeId(fields.next().?);
     const family = fields.next().?;
     const algorithm_major = try parseI64(fields.next().?);
