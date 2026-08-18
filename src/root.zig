@@ -23,4 +23,5 @@ pub const Study = study.Study;
 
 test {
     std.testing.refAllDecls(@This());
+    _ = @import("interchange_test.zig");
 }
