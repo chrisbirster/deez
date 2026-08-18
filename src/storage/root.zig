@@ -4,6 +4,7 @@ pub const schema = @import("schema.zig");
 pub const sqlite = @import("sqlite.zig");
 pub const catalog = @import("catalog.zig");
 pub const report = @import("report.zig");
+pub const backup = @import("backup.zig");
 
 pub const Db = sqlite.Db;
 pub const OwnedDeck = sqlite.OwnedDeck;
