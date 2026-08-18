@@ -10,8 +10,8 @@ pub const Rating = enum(u8) {
         return @intFromEnum(self);
     }
 
-    pub fn fromValue(value: u8) !Rating {
-        return switch (value) {
+    pub fn fromValue(raw_value: u8) !Rating {
+        return switch (raw_value) {
             1 => .again,
             2 => .hard,
             3 => .good,
