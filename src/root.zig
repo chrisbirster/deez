@@ -8,6 +8,7 @@ pub const fsrs = @import("fsrs/root.zig");
 pub const storage = @import("storage/root.zig");
 pub const study = @import("study.zig");
 pub const cli = @import("cli.zig");
+pub const app = @import("app.zig");
 
 pub const Card = card.Card;
 pub const CardId = card.CardId;
