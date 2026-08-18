@@ -6,6 +6,9 @@ pub const history = @import("history.zig");
 pub const schedule = @import("schedule.zig");
 pub const parameters = @import("parameters.zig");
 pub const engine = @import("engine.zig");
+pub const registry = @import("registry.zig");
+pub const compare = @import("compare.zig");
+pub const migration = @import("migration.zig");
 pub const v7 = @import("v7/root.zig");
 
 pub const AlgorithmId = algorithm.AlgorithmId;
