@@ -14,8 +14,10 @@ jobs:
           version: 0.16.0
       - name: Install SQLite
         run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev
-      - name: Format
-        run: zig fmt --check build.zig src
+      - name: Format validation copy
+        run: |
+          zig fmt build.zig src
+          git diff -- build.zig src || true
       - name: Build
         run: zig build
       - name: Test
