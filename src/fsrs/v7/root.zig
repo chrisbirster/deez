@@ -6,6 +6,7 @@ pub const scheduler = @import("scheduler.zig");
 pub const optimizer = @import("optimizer.zig");
 pub const evaluator = @import("evaluator.zig");
 pub const simulator = @import("simulator.zig");
+pub const retention = @import("retention.zig");
 pub const migration = @import("migration.zig");
 
 pub const MemoryState = model.MemoryState;
