@@ -3,14 +3,21 @@ const Io = std.Io;
 const deez = @import("deez");
 
 pub fn main(init: std.process.Init) !void {
-    const io = init.io;
+    const arena = init.arena.allocator();
+    const raw_args = try init.minimal.args.toSlice(arena);
+    const args = try arena.alloc([]const u8, raw_args.len);
+    for (raw_args, 0..) |arg, index| args[index] = arg;
 
-    var stdout_buffer: [1024]u8 = undefined;
-    var stdout_file_writer: Io.File.Writer = .init(.stdout(), io, &stdout_buffer);
-    const stdout = &stdout_file_writer.interface;
+    const command = deez.cli.parse(args) catch |err| {
+        var stderr_buffer: [2048]u8 = undefined;
+        var stderr_file_writer: Io.File.Writer = .init(.stderr(), init.io, &stderr_buffer);
+        const stderr = &stderr_file_writer.interface;
+        try stderr.print("deez: {s}\n\n{s}", .{ @errorName(err), deez.cli.help_text });
+        try stderr.flush();
+        return;
+    };
 
-    try stdout.print("DEEZ — Drill, Evaluate, Encode, Zen\n", .{});
-    try stdout.flush();
+    try deez.app.run(init, command);
 }
 
 test {
