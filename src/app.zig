@@ -22,8 +22,9 @@ fn printInterval(out: *Io.Writer, days: f64) !void {
 
 fn readByte(io: Io) !u8 {
     var buffer: [1]u8 = undefined;
+    var buffers = [_][]u8{buffer[0..]};
     while (true) {
-        const read = try Io.File.stdin().readStreaming(io, &buffer);
+        const read = try Io.File.stdin().readStreaming(io, &buffers);
         if (read == 0) return error.EndOfStream;
         return buffer[0];
     }
