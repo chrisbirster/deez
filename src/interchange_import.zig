@@ -244,10 +244,15 @@ fn bindOptionalText(stmt: *c.sqlite3_stmt, index: c_int, text: []const u8) !void
     }
 }
 
-fn bindOptionalId(stmt: *c.sqlite3_stmt, index: c_int, text: []const u8) !void {
-    if (try optionalId(text)) |id_value| {
-        var id = id_value;
-        try bindBlob(stmt, index, &id);
+fn bindOptionalId(
+    stmt: *c.sqlite3_stmt,
+    index: c_int,
+    text: []const u8,
+    storage_slot: *?[32]u8,
+) !void {
+    storage_slot.* = try optionalId(text);
+    if (storage_slot.*) |*id| {
+        try bindBlob(stmt, index, id);
     } else if (c.sqlite3_bind_null(stmt, index) != c.SQLITE_OK) {
         return error.SqliteBindFailed;
     }
@@ -308,9 +313,10 @@ fn importRecord(allocator: std.mem.Allocator, db: *storage.Db, line: []const u8)
     if (std.mem.eql(u8, kind, "DEFAULT")) {
         const stmt = try prepare(db, "UPDATE scheduler_defaults SET algorithm_family = ?1, algorithm_major = ?2, parameter_set_id = ?3 WHERE id = 1;");
         defer _ = c.sqlite3_finalize(stmt);
+        var parameter_id: ?[32]u8 = null;
         try bindText(stmt, 1, fields.next().?);
         try bindInt(stmt, 2, try parseI64(fields.next().?));
-        try bindOptionalId(stmt, 3, fields.next().?);
+        try bindOptionalId(stmt, 3, fields.next().?, &parameter_id);
         return stepDone(stmt);
     }
 
@@ -320,11 +326,12 @@ fn importRecord(allocator: std.mem.Allocator, db: *storage.Db, line: []const u8)
         defer allocator.free(name);
         const stmt = try prepare(db, "INSERT INTO deck_groups(id, name, algorithm_family, algorithm_major, parameter_set_id, created_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6);");
         defer _ = c.sqlite3_finalize(stmt);
+        var parameter_id: ?[32]u8 = null;
         try bindInt(stmt, 1, id);
         try bindText(stmt, 2, name);
         try bindOptionalText(stmt, 3, fields.next().?);
         try bindOptionalInt(stmt, 4, fields.next().?);
-        try bindOptionalId(stmt, 5, fields.next().?);
+        try bindOptionalId(stmt, 5, fields.next().?, &parameter_id);
         try bindInt(stmt, 6, try parseI64(fields.next().?));
         return stepDone(stmt);
     }
@@ -335,12 +342,13 @@ fn importRecord(allocator: std.mem.Allocator, db: *storage.Db, line: []const u8)
         defer allocator.free(name);
         const stmt = try prepare(db, "INSERT INTO decks(id, name, group_id, algorithm_family, algorithm_major, parameter_set_id, created_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7);");
         defer _ = c.sqlite3_finalize(stmt);
+        var parameter_id: ?[32]u8 = null;
         try bindInt(stmt, 1, id);
         try bindText(stmt, 2, name);
         try bindOptionalInt(stmt, 3, fields.next().?);
         try bindOptionalText(stmt, 4, fields.next().?);
         try bindOptionalInt(stmt, 5, fields.next().?);
-        try bindOptionalId(stmt, 6, fields.next().?);
+        try bindOptionalId(stmt, 6, fields.next().?, &parameter_id);
         try bindInt(stmt, 7, try parseI64(fields.next().?));
         return stepDone(stmt);
     }
@@ -364,13 +372,14 @@ fn importRecord(allocator: std.mem.Allocator, db: *storage.Db, line: []const u8)
 
     const stmt = try prepare(db, "INSERT INTO reviews(id, card_id, rating, reviewed_at_ms, algorithm_family, algorithm_major, implementation_major, implementation_minor, implementation_patch, parameter_set_id, scheduled_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11);");
     defer _ = c.sqlite3_finalize(stmt);
+    var parameter_id: ?[32]u8 = null;
     inline for (1..5) |index| try bindInt(stmt, index, try parseI64(fields.next().?));
     try bindOptionalText(stmt, 5, fields.next().?);
     try bindOptionalInt(stmt, 6, fields.next().?);
     try bindOptionalInt(stmt, 7, fields.next().?);
     try bindOptionalInt(stmt, 8, fields.next().?);
     try bindOptionalInt(stmt, 9, fields.next().?);
-    try bindOptionalId(stmt, 10, fields.next().?);
+    try bindOptionalId(stmt, 10, fields.next().?, &parameter_id);
     try bindOptionalInt(stmt, 11, fields.next().?);
     try stepDone(stmt);
 }
