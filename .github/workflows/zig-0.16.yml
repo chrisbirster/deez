@@ -1,0 +1,26 @@
+name: Zig 0.16 + Bongo
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: deez
+      - uses: actions/checkout@v4
+        with:
+          repository: chrisbirster/bongo
+          ref: bongo-deez-readiness
+          path: bongo
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+      - name: Install SQLite headers
+        run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev
+      - name: Test Deez against Bongo feature branch
+        working-directory: deez
+        run: zig build test
