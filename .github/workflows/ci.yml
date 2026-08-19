@@ -9,6 +9,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          path: deez
+      - uses: actions/checkout@v4
+        with:
+          repository: chrisbirster/bongo
+          ref: bongo-deez-readiness
+          path: bongo
       - uses: mlugg/setup-zig@v2
         with:
           version: 0.16.0
@@ -19,8 +26,11 @@ jobs:
             sudo apt-get install -y libsqlite3-dev
           fi
       - name: Format
+        working-directory: deez
         run: zig fmt --check build.zig src
       - name: Build
+        working-directory: deez
         run: zig build
       - name: Test
+        working-directory: deez
         run: zig build test
