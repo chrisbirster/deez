@@ -4,6 +4,11 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    const bongo_dependency = b.dependency("bongo", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
     const mod = b.addModule("deez", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
@@ -11,6 +16,7 @@ pub fn build(b: *std.Build) void {
         .link_libc = true,
     });
     mod.linkSystemLibrary("sqlite3", .{});
+    mod.addImport("bongo", bongo_dependency.module("bongo"));
 
     const exe = b.addExecutable(.{
         .name = "deez",
