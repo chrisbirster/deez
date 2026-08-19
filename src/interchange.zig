@@ -74,8 +74,7 @@ fn writeNullableInt(writer: *Io.Writer, stmt: *c.sqlite3_stmt, column: c_int) !v
 }
 
 fn exportParameters(db: *storage.Db, writer: *Io.Writer) !void {
-    const stmt = try prepare(db,
-        "SELECT id, algorithm_family, algorithm_major, implementation_major, implementation_minor, implementation_patch, source, desired_retention, minimum_interval_days, maximum_interval_days, created_at_ms FROM parameter_sets ORDER BY id;");
+    const stmt = try prepare(db, "SELECT id, algorithm_family, algorithm_major, implementation_major, implementation_minor, implementation_patch, source, desired_retention, minimum_interval_days, maximum_interval_days, created_at_ms FROM parameter_sets ORDER BY id;");
     defer _ = c.sqlite3_finalize(stmt);
     while (true) {
         switch (c.sqlite3_step(stmt)) {
@@ -104,8 +103,7 @@ fn exportParameters(db: *storage.Db, writer: *Io.Writer) !void {
 }
 
 fn exportWeights(db: *storage.Db, writer: *Io.Writer) !void {
-    const stmt = try prepare(db,
-        "SELECT parameter_set_id, position, value FROM parameter_weights ORDER BY parameter_set_id, position;");
+    const stmt = try prepare(db, "SELECT parameter_set_id, position, value FROM parameter_weights ORDER BY parameter_set_id, position;");
     defer _ = c.sqlite3_finalize(stmt);
     while (true) {
         switch (c.sqlite3_step(stmt)) {
@@ -124,8 +122,7 @@ fn exportWeights(db: *storage.Db, writer: *Io.Writer) !void {
 }
 
 fn exportDefault(db: *storage.Db, writer: *Io.Writer) !void {
-    const stmt = try prepare(db,
-        "SELECT algorithm_family, algorithm_major, parameter_set_id FROM scheduler_defaults WHERE id = 1;");
+    const stmt = try prepare(db, "SELECT algorithm_family, algorithm_major, parameter_set_id FROM scheduler_defaults WHERE id = 1;");
     defer _ = c.sqlite3_finalize(stmt);
     if (c.sqlite3_step(stmt) != c.SQLITE_ROW) return error.MissingSchedulerDefault;
     try writer.print("DEFAULT\t{s}\t{d}\t", .{
@@ -137,8 +134,7 @@ fn exportDefault(db: *storage.Db, writer: *Io.Writer) !void {
 }
 
 fn exportGroups(db: *storage.Db, writer: *Io.Writer) !void {
-    const stmt = try prepare(db,
-        "SELECT id, name, algorithm_family, algorithm_major, parameter_set_id, created_at_ms FROM deck_groups ORDER BY id;");
+    const stmt = try prepare(db, "SELECT id, name, algorithm_family, algorithm_major, parameter_set_id, created_at_ms FROM deck_groups ORDER BY id;");
     defer _ = c.sqlite3_finalize(stmt);
     while (true) {
         switch (c.sqlite3_step(stmt)) {
@@ -160,8 +156,7 @@ fn exportGroups(db: *storage.Db, writer: *Io.Writer) !void {
 }
 
 fn exportDecks(db: *storage.Db, writer: *Io.Writer) !void {
-    const stmt = try prepare(db,
-        "SELECT id, name, group_id, algorithm_family, algorithm_major, parameter_set_id, created_at_ms FROM decks ORDER BY id;");
+    const stmt = try prepare(db, "SELECT id, name, group_id, algorithm_family, algorithm_major, parameter_set_id, created_at_ms FROM decks ORDER BY id;");
     defer _ = c.sqlite3_finalize(stmt);
     while (true) {
         switch (c.sqlite3_step(stmt)) {
@@ -185,8 +180,7 @@ fn exportDecks(db: *storage.Db, writer: *Io.Writer) !void {
 }
 
 fn exportCards(db: *storage.Db, writer: *Io.Writer) !void {
-    const stmt = try prepare(db,
-        "SELECT id, deck_id, question, answer, created_at_ms FROM cards ORDER BY id;");
+    const stmt = try prepare(db, "SELECT id, deck_id, question, answer, created_at_ms FROM cards ORDER BY id;");
     defer _ = c.sqlite3_finalize(stmt);
     while (true) {
         switch (c.sqlite3_step(stmt)) {
@@ -207,8 +201,7 @@ fn exportCards(db: *storage.Db, writer: *Io.Writer) !void {
 }
 
 fn exportReviews(db: *storage.Db, writer: *Io.Writer) !void {
-    const stmt = try prepare(db,
-        "SELECT id, card_id, rating, reviewed_at_ms, algorithm_family, algorithm_major, implementation_major, implementation_minor, implementation_patch, parameter_set_id, scheduled_at_ms FROM reviews ORDER BY id;");
+    const stmt = try prepare(db, "SELECT id, card_id, rating, reviewed_at_ms, algorithm_family, algorithm_major, implementation_major, implementation_minor, implementation_patch, parameter_set_id, scheduled_at_ms FROM reviews ORDER BY id;");
     defer _ = c.sqlite3_finalize(stmt);
     while (true) {
         switch (c.sqlite3_step(stmt)) {
