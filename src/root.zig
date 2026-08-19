@@ -9,6 +9,8 @@ pub const storage = @import("storage/root.zig");
 pub const study = @import("study.zig");
 pub const cli = @import("cli.zig");
 pub const app = @import("app.zig");
+pub const interchange = @import("interchange.zig");
+pub const interchange_import = @import("interchange_import.zig");
 
 pub const Card = card.Card;
 pub const CardId = card.CardId;
@@ -21,4 +23,5 @@ pub const Study = study.Study;
 
 test {
     std.testing.refAllDecls(@This());
+    _ = @import("interchange_test.zig");
 }
