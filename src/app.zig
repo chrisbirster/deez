@@ -54,14 +54,14 @@ fn historyViews(
 }
 
 fn baseParameters(
-    catalog: storage.Catalog,
+    store: *storage.Store,
     deck_id: ?u64,
     now_ms: i64,
 ) !fsrs.v7.Parameters {
     if (deck_id) |id| {
-        const resolved = try catalog.resolveDeckScheduler(id, now_ms);
+        const resolved = try store.resolveDeckScheduler(id, now_ms);
         if (!resolved.algorithm.eql(.fsrs7)) return error.UnsupportedAlgorithm;
-        return catalog.loadFsrs7Parameters(resolved.parameter_set_id);
+        return store.loadFsrs7Parameters(resolved.parameter_set_id);
     }
     return .{};
 }
@@ -116,16 +116,34 @@ pub fn run(init: std.process.Init, command: cli.Command) !void {
     const allocator = init.gpa;
     const io = init.io;
     const arena = init.arena.allocator();
+    const backend = init.environ_map.get("DEEZ_STORAGE") orelse "sqlite";
+
+    if (std.mem.eql(u8, backend, "mongodb")) {
+        const uri = init.environ_map.get("DEEZ_MONGO_URI") orelse
+            return error.MissingMongoUri;
+        var mongo = try storage.MongoStore.connect(io, allocator, uri);
+        var store: storage.Store = .{ .mongodb = mongo };
+        defer store.deinit();
+        return runWithStore(allocator, io, command, &store);
+    }
+
+    if (!std.mem.eql(u8, backend, "sqlite")) return error.UnsupportedStorageBackend;
     const db_path = init.environ_map.get("DEEZ_DB") orelse "deez.db";
     const db_path_z = try arena.dupeZ(u8, db_path);
-
     var db = try storage.Db.open(db_path_z);
     defer db.close();
     try db.migrate();
+    var store: storage.Store = .{ .sqlite = &db };
+    return runWithStore(allocator, io, command, &store);
+}
 
-    const catalog: storage.Catalog = .{ .db = &db };
-    const report: storage.Report = .{ .db = &db };
-    const study = study_mod.Study.init(&db);
+fn runWithStore(
+    allocator: std.mem.Allocator,
+    io: Io,
+    command: cli.Command,
+    store: *storage.Store,
+) !void {
+    const study = study_mod.Study.init(store);
 
     var stdout_buffer: [4096]u8 = undefined;
     var stdout_file_writer: Io.File.Writer = .init(.stdout(), io, &stdout_buffer);
@@ -136,7 +154,7 @@ pub fn run(init: std.process.Init, command: cli.Command) !void {
     switch (command) {
         .help => try out.print("{s}", .{cli.help_text}),
         .decks => {
-            const decks = try report.decks(allocator, now_ms);
+            const decks = try store.decks(allocator, now_ms);
             defer {
                 for (decks) |deck| deck.deinit(allocator);
                 allocator.free(decks);
@@ -147,33 +165,33 @@ pub fn run(init: std.process.Init, command: cli.Command) !void {
             }
         },
         .deck_add => |args| {
-            const id = try db.createDeck(args.name, now_ms);
-            _ = try catalog.ensureDefaultFsrs7(now_ms);
+            const id = try store.createDeck(args.name, now_ms);
+            _ = try store.ensureDefaultFsrs7(now_ms);
             try out.print("Created deck {d}: {s}\n", .{ id, args.name });
         },
         .deck_rename => |args| {
-            try db.renameDeck(args.deck_id, args.name);
+            try store.renameDeck(args.deck_id, args.name);
             try out.print("Renamed deck {d}.\n", .{args.deck_id});
         },
         .deck_delete => |args| {
-            try db.deleteDeck(args.deck_id);
+            try store.deleteDeck(args.deck_id);
             try out.print("Deleted deck {d}.\n", .{args.deck_id});
         },
         .card_add => |args| {
-            const id = try db.createCard(args.deck_id, args.question, args.answer, now_ms);
+            const id = try store.createCard(args.deck_id, args.question, args.answer, now_ms);
             try out.print("Created card {d}.\n", .{id});
         },
         .card_edit => |args| {
-            try db.updateCard(args.card_id, args.question, args.answer);
+            try store.updateCard(args.card_id, args.question, args.answer);
             try out.print("Updated card {d}.\n", .{args.card_id});
         },
         .card_delete => |args| {
-            try db.deleteCard(args.card_id);
+            try store.deleteCard(args.card_id);
             try out.print("Deleted card {d}.\n", .{args.card_id});
         },
         .study => |args| try studyDeck(allocator, io, out, study, args.deck_id),
         .stats => |args| {
-            const stats = try report.stats(now_ms, args.deck_id);
+            const stats = try store.stats(now_ms, args.deck_id);
             try out.print("Decks: {d}\nCards: {d}\nDue: {d}\nReviews: {d}\n", .{
                 stats.deck_count,
                 stats.card_count,
@@ -189,26 +207,26 @@ pub fn run(init: std.process.Init, command: cli.Command) !void {
                 preview.parameter_set_id,
             });
             if (preview.retrievability) |value| try out.print("Retrievability: {d:.2}%\n", .{value * 100.0});
-            if (try catalog.getSchedulerState(args.card_id)) |state| {
+            if (try store.getSchedulerState(args.card_id)) |state| {
                 if (state.stability_days) |value| try out.print("Stability: {d:.3} days\n", .{value});
                 if (state.difficulty) |value| try out.print("Difficulty: {d:.3}\n", .{value});
                 try out.print("Due: {d}\n", .{state.due_at_ms});
             }
         },
         .fsrs_optimize => |args| {
-            const owned = try report.histories(allocator, args.deck_id);
+            const owned = try store.histories(allocator, args.deck_id);
             defer owned.deinit(allocator);
             const views = try historyViews(allocator, owned);
             defer allocator.free(views);
-            const initial = try baseParameters(catalog, args.deck_id, now_ms);
+            const initial = try baseParameters(store, args.deck_id, now_ms);
             const result = try fsrs.v7.optimizer.optimize(views, initial, .{
                 .recency_half_life_days = args.recency_half_life_days,
             });
-            const id = try catalog.putFsrs7Parameters(result.parameters, "optimized", now_ms);
+            const id = try store.putFsrs7Parameters(result.parameters, "optimized", now_ms);
             if (args.deck_id) |deck_id| {
-                try catalog.setDeckFsrs7(deck_id, id);
+                try store.setDeckFsrs7(deck_id, id);
             } else {
-                try catalog.setGlobalFsrs7(id);
+                try store.setGlobalFsrs7(id);
             }
             try out.print("Examples: {d}\nLog loss: {d:.6} -> {d:.6}\nParameter set: {x}\n", .{
                 result.examples,
@@ -218,11 +236,11 @@ pub fn run(init: std.process.Init, command: cli.Command) !void {
             });
         },
         .fsrs_evaluate => |args| {
-            const owned = try report.histories(allocator, args.deck_id);
+            const owned = try store.histories(allocator, args.deck_id);
             defer owned.deinit(allocator);
             const views = try historyViews(allocator, owned);
             defer allocator.free(views);
-            const parameters = try baseParameters(catalog, args.deck_id, now_ms);
+            const parameters = try baseParameters(store, args.deck_id, now_ms);
             const metrics = try fsrs.v7.evaluator.evaluate(views, parameters, .{});
             try out.print("Examples: {d}\nLog loss: {d:.6}\nRMSE: {d:.6}\nCalibration error: {d:.6}\n", .{
                 metrics.examples,
