@@ -3,9 +3,11 @@ const card_mod = @import("../card.zig");
 const fsrs = @import("../fsrs/root.zig");
 const time = @import("../time.zig");
 const sqlite = @import("sqlite.zig");
+const sqlite_cards = @import("sqlite_cards.zig");
 const catalog_mod = @import("catalog.zig");
 const report_mod = @import("report.zig");
 const mongodb = @import("mongodb.zig");
+const mongodb_cards = @import("mongodb_cards.zig");
 
 const Allocator = std.mem.Allocator;
 
@@ -83,6 +85,17 @@ pub const Store = union(enum) {
         return switch (self.*) {
             .sqlite => |db| db.getCard(allocator, id),
             .mongodb => |*store| store.getCard(allocator, id),
+        };
+    }
+
+    pub fn cards(
+        self: *Store,
+        allocator: Allocator,
+        deck_id: card_mod.DeckId,
+    ) ![]sqlite.OwnedCard {
+        return switch (self.*) {
+            .sqlite => |db| sqlite_cards.list(db, allocator, deck_id),
+            .mongodb => |*store| mongodb_cards.list(store, allocator, deck_id),
         };
     }
 

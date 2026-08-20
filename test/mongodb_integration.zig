@@ -74,6 +74,17 @@ test "MongoStore supports Deez transaction workflow and reconnect" {
         try std.testing.expectEqual(deck_id, loaded_card.deck_id);
         try std.testing.expectEqualStrings("What is BSON?", loaded_card.question);
 
+        const listed_cards = try store.cards(allocator, deck_id);
+        defer {
+            for (listed_cards) |card| card.deinit(allocator);
+            allocator.free(listed_cards);
+        }
+        try std.testing.expectEqual(@as(usize, 2), listed_cards.len);
+        try std.testing.expectEqual(card_id, listed_cards[0].id);
+        try std.testing.expectEqual(second_card_id, listed_cards[1].id);
+        try std.testing.expectEqualStrings("What is BSON?", listed_cards[0].question);
+        try std.testing.expectEqualStrings("What is Zig?", listed_cards[1].question);
+
         const initially_due = try store.dueCards(allocator, deck_id, 1, 10);
         defer {
             for (initially_due) |card| card.deinit(allocator);
@@ -120,8 +131,6 @@ test "MongoStore supports Deez transaction workflow and reconnect" {
         try std.testing.expectEqual(@as(usize, 2), stats.due_count);
     }
 
-    // A new RuntimeClient must see the same Deez records. This proves the
-    // backend is using MongoDB persistence rather than process-local state.
     {
         var store = try connectStore(replica_uri);
         defer store.deinit();
@@ -136,6 +145,15 @@ test "MongoStore supports Deez transaction workflow and reconnect" {
             return error.MissingCardAfterReconnect;
         defer loaded_card.deinit(allocator);
         try std.testing.expectEqualStrings("Binary JSON", loaded_card.answer);
+
+        const listed_cards = try store.cards(allocator, deck_id);
+        defer {
+            for (listed_cards) |card| card.deinit(allocator);
+            allocator.free(listed_cards);
+        }
+        try std.testing.expectEqual(@as(usize, 2), listed_cards.len);
+        try std.testing.expectEqual(card_id, listed_cards[0].id);
+        try std.testing.expectEqual(second_card_id, listed_cards[1].id);
 
         const history = try store.loadHistory(allocator, card_id);
         defer allocator.free(history);
@@ -182,8 +200,6 @@ test "MongoStore standalone fallback preserves review history and derived state"
         return error.MissingStandaloneSchedulerState;
     try std.testing.expectEqual(result.state.due_at_ms, stored.due_at_ms);
 
-    // Derived state is disposable. The immutable review remains and is enough
-    // for Deez to reconstruct the same FSRS memory state.
     try store.clearSchedulerState(card_id);
     try std.testing.expect((try store.getSchedulerState(card_id)) == null);
     const rebuilt = (try study.rebuildCardState(
@@ -221,9 +237,6 @@ test "storage.Store propagates a rejected MongoDB write" {
     const deck_id = try store.createDeck("mongo-write-error", 0);
     defer store.deleteDeck(deck_id) catch {};
 
-    // MongoDB's BSON document limit is 16 MiB. A 17 MiB question is large
-    // enough for the insert to be rejected while still exercising Deez only
-    // through the existing storage.Store createCard operation.
     const oversized_question = try allocator.alloc(u8, 17 * 1024 * 1024);
     defer allocator.free(oversized_question);
     @memset(oversized_question, 'x');

@@ -16,6 +16,7 @@ pub const HelpTopic = enum {
 pub const Command = union(enum) {
     help: HelpTopic,
     decks,
+    cards: struct { deck_id: DeckId },
     deck_add: struct { name: []const u8 },
     deck_rename: struct { deck_id: DeckId, name: []const u8 },
     deck_delete: struct { deck_id: DeckId },
@@ -44,9 +45,14 @@ fn expectLength(args: []const []const u8, expected: usize) !void {
     if (args.len != expected) return error.InvalidArguments;
 }
 
+fn requireText(text: []const u8) ![]const u8 {
+    if (std.mem.trim(u8, text, " \t\r\n").len == 0) return error.InvalidText;
+    return text;
+}
+
 fn parseHelpTopic(text: []const u8) !HelpTopic {
     if (std.mem.eql(u8, text, "deck") or std.mem.eql(u8, text, "decks")) return .deck;
-    if (std.mem.eql(u8, text, "card")) return .card;
+    if (std.mem.eql(u8, text, "card") or std.mem.eql(u8, text, "cards")) return .card;
     if (std.mem.eql(u8, text, "study")) return .study;
     if (std.mem.eql(u8, text, "stats")) return .stats;
     if (std.mem.eql(u8, text, "inspect")) return .inspect;
@@ -77,16 +83,24 @@ pub fn parse(args: []const []const u8) !Command {
         try expectLength(args, 2);
         return .decks;
     }
+    if (std.mem.eql(u8, command, "cards")) {
+        if (args.len == 3 and isHelp(args[2])) return .{ .help = .card };
+        try expectLength(args, 3);
+        return .{ .cards = .{ .deck_id = try parseId(args[2]) } };
+    }
     if (std.mem.eql(u8, command, "deck")) {
         if (args.len == 3 and isHelp(args[2])) return .{ .help = .deck };
         if (args.len < 3) return error.InvalidArguments;
         if (std.mem.eql(u8, args[2], "add")) {
             try expectLength(args, 4);
-            return .{ .deck_add = .{ .name = args[3] } };
+            return .{ .deck_add = .{ .name = try requireText(args[3]) } };
         }
         if (std.mem.eql(u8, args[2], "rename")) {
             try expectLength(args, 5);
-            return .{ .deck_rename = .{ .deck_id = try parseId(args[3]), .name = args[4] } };
+            return .{ .deck_rename = .{
+                .deck_id = try parseId(args[3]),
+                .name = try requireText(args[4]),
+            } };
         }
         if (std.mem.eql(u8, args[2], "delete")) {
             if (args.len != 5 or !std.mem.eql(u8, args[4], "--yes")) return error.ConfirmationRequired;
@@ -101,16 +115,16 @@ pub fn parse(args: []const []const u8) !Command {
             try expectLength(args, 6);
             return .{ .card_add = .{
                 .deck_id = try parseId(args[3]),
-                .question = args[4],
-                .answer = args[5],
+                .question = try requireText(args[4]),
+                .answer = try requireText(args[5]),
             } };
         }
         if (std.mem.eql(u8, args[2], "edit")) {
             try expectLength(args, 6);
             return .{ .card_edit = .{
                 .card_id = try parseId(args[3]),
-                .question = args[4],
-                .answer = args[5],
+                .question = try requireText(args[4]),
+                .answer = try requireText(args[5]),
             } };
         }
         if (std.mem.eql(u8, args[2], "delete")) {
@@ -199,6 +213,7 @@ pub const help_text =
     \\Usage:
     \\  deez help [deck|card|study|stats|inspect|fsrs|scheduler]
     \\  deez decks
+    \\  deez cards <deck-id>
     \\  deez deck add <name>
     \\  deez deck rename <deck-id> <name>
     \\  deez deck delete <deck-id> --yes
@@ -224,6 +239,7 @@ const deck_help =
 ;
 const card_help =
     \\Card commands:
+    \\  deez cards <deck-id>
     \\  deez card add <deck-id> <question> <answer>
     \\  deez card edit <card-id> <question> <answer>
     \\  deez card delete <card-id> --yes
@@ -259,9 +275,13 @@ test "parse study command" {
     try std.testing.expectEqual(@as(DeckId, 42), command.study.deck_id);
 }
 
-test "parse card add command" {
-    const args = [_][]const u8{ "deez", "card", "add", "3", "What is BSON?", "Binary JSON" };
-    const command = try parse(&args);
+test "parse card listing and add commands" {
+    const list_args = [_][]const u8{ "deez", "cards", "3" };
+    const listing = try parse(&list_args);
+    try std.testing.expectEqual(@as(DeckId, 3), listing.cards.deck_id);
+
+    const add_args = [_][]const u8{ "deez", "card", "add", "3", "What is BSON?", "Binary JSON" };
+    const command = try parse(&add_args);
     try std.testing.expectEqual(@as(DeckId, 3), command.card_add.deck_id);
     try std.testing.expectEqualStrings("What is BSON?", command.card_add.question);
 }
@@ -298,10 +318,21 @@ test "destructive commands require explicit confirmation" {
     try std.testing.expectError(error.ConfirmationRequired, parse(&card_args));
 }
 
-test "missing required arguments are rejected" {
+test "blank names and card text are rejected" {
+    const deck_args = [_][]const u8{ "deez", "deck", "add", "   " };
+    try std.testing.expectError(error.InvalidText, parse(&deck_args));
+    const card_args = [_][]const u8{ "deez", "card", "add", "1", "", "answer" };
+    try std.testing.expectError(error.InvalidText, parse(&card_args));
+}
+
+test "invalid ids and missing required arguments are rejected" {
+    const invalid_id = [_][]const u8{ "deez", "cards", "nope" };
+    try std.testing.expectError(error.InvalidId, parse(&invalid_id));
+
     const cases = [_][]const []const u8{
         &.{ "deez", "deck" },
         &.{ "deez", "deck", "add" },
+        &.{ "deez", "cards" },
         &.{ "deez", "card" },
         &.{ "deez", "card", "add", "1" },
         &.{ "deez", "study" },

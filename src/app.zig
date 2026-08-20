@@ -157,6 +157,15 @@ fn runWithStore(
             try out.print("ID  NAME  CARDS  DUE\n", .{});
             for (decks) |deck| try out.print("{d}  {s}  {d}  {d}\n", .{ deck.id, deck.name, deck.card_count, deck.due_count });
         },
+        .cards => |args| {
+            const cards = try store.cards(allocator, args.deck_id);
+            defer {
+                for (cards) |card| card.deinit(allocator);
+                allocator.free(cards);
+            }
+            try out.print("ID  QUESTION\n", .{});
+            for (cards) |card| try out.print("{d}  {s}\n", .{ card.id, card.question });
+        },
         .deck_add => |args| {
             const id = try store.createDeck(args.name, now_ms);
             _ = try store.ensureDefaultFsrs7(now_ms);
@@ -204,12 +213,21 @@ fn runWithStore(
         .inspect => |args| {
             const preview = try study.preview(allocator, args.card_id, now_ms);
             const state = try store.getSchedulerState(args.card_id);
+            const parameters = try store.loadFsrs7Parameters(preview.parameter_set_id);
+            const implementation = fsrs.ImplementationVersion.current;
             if (args.json) {
-                try out.print("{{\"card_id\":{d},\"scheduler\":\"fsrs/{d}\",\"parameter_set\":\"{x}\",", .{
-                    args.card_id,
-                    preview.algorithm.major,
-                    preview.parameter_set_id,
-                });
+                try out.print(
+                    "{{\"card_id\":{d},\"scheduler\":\"fsrs/{d}\",\"implementation\":\"{d}.{d}.{d}\",\"desired_retention\":{d},\"parameter_set\":\"{x}\",",
+                    .{
+                        args.card_id,
+                        preview.algorithm.major,
+                        implementation.major,
+                        implementation.minor,
+                        implementation.patch,
+                        parameters.desired_retention,
+                        preview.parameter_set_id,
+                    },
+                );
                 if (preview.retrievability) |value| {
                     try out.print("\"retrievability\":{d},", .{value});
                 } else try out.print("\"retrievability\":null,", .{});
@@ -221,11 +239,18 @@ fn runWithStore(
                     try out.print("\"stability_days\":null,\"difficulty\":null,\"due_at_ms\":null}}\n", .{});
                 }
             } else {
-                try out.print("Card: {d}\nScheduler: FSRS-{d}\nParameter set: {x}\n", .{
-                    args.card_id,
-                    preview.algorithm.major,
-                    preview.parameter_set_id,
-                });
+                try out.print(
+                    "Card: {d}\nScheduler: FSRS-{d}\nImplementation: {d}.{d}.{d}\nDesired retention: {d:.2}%\nParameter set: {x}\n",
+                    .{
+                        args.card_id,
+                        preview.algorithm.major,
+                        implementation.major,
+                        implementation.minor,
+                        implementation.patch,
+                        parameters.desired_retention * 100.0,
+                        preview.parameter_set_id,
+                    },
+                );
                 if (preview.retrievability) |value| try out.print("Retrievability: {d:.2}%\n", .{value * 100.0});
                 if (state) |stored| {
                     if (stored.stability_days) |value| try out.print("Stability: {d:.3} days\n", .{value});
@@ -289,6 +314,13 @@ fn runWithStore(
                 });
             }
         },
-        .scheduler_list => try out.print("FSRS-7  supported  current\n", .{}),
+        .scheduler_list => {
+            const implementation = fsrs.ImplementationVersion.current;
+            try out.print("FSRS-7  supported  implementation={d}.{d}.{d}\n", .{
+                implementation.major,
+                implementation.minor,
+                implementation.patch,
+            });
+        },
     }
 }
