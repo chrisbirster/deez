@@ -158,12 +158,7 @@ fn runWithStore(
             for (decks) |deck| try out.print("{d}  {s}  {d}  {d}\n", .{ deck.id, deck.name, deck.card_count, deck.due_count });
         },
         .cards => |args| {
-            const cards = try store.dueCards(
-                allocator,
-                args.deck_id,
-                std.math.maxInt(i64),
-                std.math.maxInt(usize),
-            );
+            const cards = try store.cards(allocator, args.deck_id);
             defer {
                 for (cards) |card| card.deinit(allocator);
                 allocator.free(cards);
