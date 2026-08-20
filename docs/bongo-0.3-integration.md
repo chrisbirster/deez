@@ -7,7 +7,7 @@ Deez treats Bongo v0.3.0 as a frozen third-party dependency for the optional Mon
 Deez is pinned through `build.zig.zon` to Bongo commit:
 
 ```text
-631bb812777af587162daa650b53f48196960d55
+a9694fabedafc72ccd359265e141a80a1c45cd80
 ```
 
 The Bongo package at that commit declares version `0.3.0`. Deez must not follow Bongo `dev`, use a sibling `../bongo` package dependency, or depend on functionality added after this commit.

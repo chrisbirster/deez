@@ -5,7 +5,7 @@
     .minimum_zig_version = "0.16.0",
     .dependencies = .{
         .bongo = .{
-            .url = "git+https://github.com/chrisbirster/bongo#631bb812777af587162daa650b53f48196960d55",
+            .url = "git+https://github.com/chrisbirster/bongo#a9694fabedafc72ccd359265e141a80a1c45cd80",
             .hash = "bongo-0.3.0-H33KDc-8CABONuLebJcy6qeQJHNTyKb5fy9wdg5v86Fp",
         },
     },
