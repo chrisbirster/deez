@@ -249,3 +249,52 @@ test "storage.Store propagates a rejected MongoDB write" {
     const stats = try store.stats(0, deck_id);
     try std.testing.expectEqual(@as(usize, 0), stats.card_count);
 }
+
+test "MongoStore study session enforces new limit and relearning due time" {
+    const allocator = std.testing.allocator;
+    var store = try connectStore(replica_uri);
+    defer store.deinit();
+
+    const deck_id = try store.createDeck("mongo-session-policy", 0);
+    defer store.deleteDeck(deck_id) catch {};
+    _ = try store.ensureDefaultFsrs7(0);
+    const first_id = try store.createCard(deck_id, "first", "1", 0);
+    _ = try store.createCard(deck_id, "second", "2", 0);
+
+    const study = deez.Study.init(&store);
+    var session = deez.study.Session.init(study, deck_id, .{
+        .new_limit = 1,
+        .review_order = .new_first,
+    });
+
+    var first = (try session.next(allocator, 0)).?;
+    try std.testing.expectEqual(first_id, first.id);
+    first.deinit(allocator);
+
+    const learned = try study.recordReview(allocator, first_id, .good, 0);
+    try std.testing.expect((try session.next(allocator, 0)) == null);
+
+    var review_session = deez.study.Session.init(study, deck_id, .{
+        .new_limit = 0,
+        .review_order = .reviews_first,
+    });
+    var due_review = (try review_session.next(allocator, learned.candidate.due_at_ms)).?;
+    try std.testing.expectEqual(first_id, due_review.id);
+    due_review.deinit(allocator);
+
+    const lapse = try study.recordReview(
+        allocator,
+        first_id,
+        .again,
+        learned.candidate.due_at_ms,
+    );
+    if (lapse.candidate.due_at_ms > learned.candidate.due_at_ms) {
+        try std.testing.expect(
+            (try review_session.next(allocator, lapse.candidate.due_at_ms - 1)) == null,
+        );
+    }
+
+    var relearning = (try review_session.next(allocator, lapse.candidate.due_at_ms)).?;
+    try std.testing.expectEqual(first_id, relearning.id);
+    relearning.deinit(allocator);
+}
