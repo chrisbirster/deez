@@ -212,3 +212,27 @@ test "MongoStore propagates startup authentication and TLS failures" {
         "mongodb://admin:secretpassword@localhost:27018/deez_tls_failure?authSource=admin&tls=true",
     );
 }
+
+test "storage.Store propagates a rejected MongoDB write" {
+    const allocator = std.testing.allocator;
+    var store = try connectStore(replica_uri);
+    defer store.deinit();
+
+    const deck_id = try store.createDeck("mongo-write-error", 0);
+    defer store.deleteDeck(deck_id) catch {};
+
+    // MongoDB's BSON document limit is 16 MiB. A 17 MiB question is large
+    // enough for the insert to be rejected while still exercising Deez only
+    // through the existing storage.Store createCard operation.
+    const oversized_question = try allocator.alloc(u8, 17 * 1024 * 1024);
+    defer allocator.free(oversized_question);
+    @memset(oversized_question, 'x');
+
+    if (store.createCard(deck_id, oversized_question, "answer", 0)) |card_id| {
+        store.deleteCard(card_id) catch {};
+        return error.ExpectedMongoWriteFailure;
+    } else |_| {}
+
+    const stats = try store.stats(0, deck_id);
+    try std.testing.expectEqual(@as(usize, 0), stats.card_count);
+}
