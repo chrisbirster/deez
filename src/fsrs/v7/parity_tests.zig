@@ -1,5 +1,7 @@
 const std = @import("std");
-const fsrs = @import("root.zig");
+const model = @import("model.zig");
+const parameters_mod = @import("parameters.zig");
+const scheduler = @import("scheduler.zig");
 const Rating = @import("../rating.zig").Rating;
 const HistoryEntry = @import("../history.zig").Entry;
 const time = @import("../../time.zig");
@@ -28,89 +30,51 @@ test "upstream FSRS-7 default parameter vector remains pinned" {
         2.5, 1.0,
         0.0723, 0.1634, 0.5, 0.9555, 0.2245, 0.6232, 0.1362, 0.3862,
     };
-    const parameters: fsrs.Parameters = .{};
+    const parameters: parameters_mod.Parameters = .{};
     try std.testing.expectEqualSlices(f64, &expected, &parameters.weights);
 }
 
 test "upstream FSRS-7 initial states cover all ratings" {
-    const parameters: fsrs.Parameters = .{};
+    const parameters: parameters_mod.Parameters = .{};
     const ratings = [_]Rating{ .again, .hard, .good, .easy };
     const stability = [_]f64{ 0.041, 2.4175, 4.1283, 11.9709 };
-    const difficulty = [_]f64{
-        5.6385,
-        5.075198392303237,
-        4.194588083372719,
-        2.817928571667297,
-    };
-
+    const difficulty = [_]f64{ 5.6385, 5.075198392303237, 4.194588083372719, 2.817928571667297 };
     for (ratings, stability, difficulty) |rating, expected_s, expected_d| {
-        const state = fsrs.model.initialMemoryState(rating, parameters);
+        const state = model.initialMemoryState(rating, parameters);
         try expectClose(expected_s, state.stability_days);
         try expectClose(expected_d, state.difficulty);
     }
 }
 
 test "upstream FSRS-7 forgetting curve covers same-day and long intervals" {
-    const parameters: fsrs.Parameters = .{};
-    const state = fsrs.model.initialMemoryState(.good, parameters);
+    const parameters: parameters_mod.Parameters = .{};
+    const state = model.initialMemoryState(.good, parameters);
     const elapsed = [_]f64{ 0.0, 1.0 / 144.0, 0.25, 1.0, 2.0, 10.0 };
-    const expected = [_]f64{
-        1.0,
-        0.9693189917294772,
-        0.9404929608601553,
-        0.9242342483541028,
-        0.9107175041978118,
-        0.8455626424668119,
-    };
-
-    for (elapsed, expected) |days, value| {
-        try expectClose(value, try fsrs.model.retrievability(days, state, parameters));
-    }
+    const expected = [_]f64{ 1.0, 0.9693189917294772, 0.9404929608601553, 0.9242342483541028, 0.9107175041978118, 0.8455626424668119 };
+    for (elapsed, expected) |days, value| try expectClose(value, try model.retrievability(days, state, parameters));
 }
 
 test "upstream FSRS-7 same-day transitions cover Again Hard Good Easy" {
-    const parameters: fsrs.Parameters = .{};
-    const state = fsrs.model.initialMemoryState(.good, parameters);
+    const parameters: parameters_mod.Parameters = .{};
+    const state = model.initialMemoryState(.good, parameters);
     const ratings = [_]Rating{ .again, .hard, .good, .easy };
-    const expected_s = [_]f64{
-        0.15811635416498357,
-        4.778504242699423,
-        5.284074098785149,
-        5.630806328420692,
-    };
-    const expected_d = [_]f64{
-        8.347017296104067,
-        6.263919392179866,
-        4.180821488255665,
-        2.097723584331464,
-    };
-
+    const expected_s = [_]f64{ 0.15811635416498357, 4.778504242699423, 5.284074098785149, 5.630806328420692 };
+    const expected_d = [_]f64{ 8.347017296104067, 6.263919392179866, 4.180821488255665, 2.097723584331464 };
     for (ratings, expected_s, expected_d) |rating, stability, difficulty| {
-        const next = try fsrs.model.nextMemoryState(state, 1.0 / 144.0, rating, parameters);
+        const next = try model.nextMemoryState(state, 1.0 / 144.0, rating, parameters);
         try expectClose(stability, next.stability_days);
         try expectClose(difficulty, next.difficulty);
     }
 }
 
 test "upstream FSRS-7 normal transitions cover Again Hard Good Easy" {
-    const parameters: fsrs.Parameters = .{};
-    const state = fsrs.model.initialMemoryState(.good, parameters);
+    const parameters: parameters_mod.Parameters = .{};
+    const state = model.initialMemoryState(.good, parameters);
     const ratings = [_]Rating{ .again, .hard, .good, .easy };
-    const expected_s = [_]f64{
-        0.8453640589005196,
-        8.255985782255209,
-        10.362647327728341,
-        12.232951526046847,
-    };
-    const expected_d = [_]f64{
-        8.347017296104067,
-        6.263919392179866,
-        4.180821488255665,
-        2.097723584331464,
-    };
-
+    const expected_s = [_]f64{ 0.8453640589005196, 8.255985782255209, 10.362647327728341, 12.232951526046847 };
+    const expected_d = [_]f64{ 8.347017296104067, 6.263919392179866, 4.180821488255665, 2.097723584331464 };
     for (ratings, expected_s, expected_d) |rating, stability, difficulty| {
-        const next = try fsrs.model.nextMemoryState(state, 2.0, rating, parameters);
+        const next = try model.nextMemoryState(state, 2.0, rating, parameters);
         try expectClose(stability, next.stability_days);
         try expectClose(difficulty, next.difficulty);
     }
@@ -125,8 +89,7 @@ test "upstream FSRS-7 replay matches mixed same-day success and lapse history" {
         .{ .rating = .again, .reviewed_at_ms = day / 4 + 9 * day },
         .{ .rating = .easy, .reviewed_at_ms = day / 4 + 9 * day + day / 10 },
     };
-
-    const replayed = (try (fsrs.Engine{}).replay(&history)).?;
+    const replayed = (try (scheduler.Engine{}).replay(&history)).?;
     try expectClose(2.738262934528915, replayed.memory.stability_days);
     try expectClose(8.446142904111408, replayed.memory.difficulty);
 }
