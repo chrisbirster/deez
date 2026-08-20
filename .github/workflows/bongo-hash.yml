@@ -2,6 +2,7 @@ name: Compute Bongo package hash
 
 on:
   push:
+  pull_request:
 
 jobs:
   hash:
