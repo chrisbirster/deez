@@ -53,11 +53,7 @@ fn historyViews(
     return views;
 }
 
-fn baseParameters(
-    store: *storage.Store,
-    deck_id: ?u64,
-    now_ms: i64,
-) !fsrs.v7.Parameters {
+fn baseParameters(store: *storage.Store, deck_id: ?u64, now_ms: i64) !fsrs.v7.Parameters {
     if (deck_id) |id| {
         const resolved = try store.resolveDeckScheduler(id, now_ms);
         if (!resolved.algorithm.eql(.fsrs7)) return error.UnsupportedAlgorithm;
@@ -119,8 +115,7 @@ pub fn run(init: std.process.Init, command: cli.Command) !void {
     const backend = init.environ_map.get("DEEZ_STORAGE") orelse "sqlite";
 
     if (std.mem.eql(u8, backend, "mongodb")) {
-        const uri = init.environ_map.get("DEEZ_MONGO_URI") orelse
-            return error.MissingMongoUri;
+        const uri = init.environ_map.get("DEEZ_MONGO_URI") orelse return error.MissingMongoUri;
         const mongo = try storage.MongoStore.connect(io, allocator, uri);
         var store: storage.Store = .{ .mongodb = mongo };
         defer store.deinit();
@@ -152,7 +147,7 @@ fn runWithStore(
 
     const now_ms = nowMs(io);
     switch (command) {
-        .help => try out.print("{s}", .{cli.help_text}),
+        .help => |topic| try out.print("{s}", .{cli.helpText(topic)}),
         .decks => {
             const decks = try store.decks(allocator, now_ms);
             defer {
@@ -160,9 +155,7 @@ fn runWithStore(
                 allocator.free(decks);
             }
             try out.print("ID  NAME  CARDS  DUE\n", .{});
-            for (decks) |deck| {
-                try out.print("{d}  {s}  {d}  {d}\n", .{ deck.id, deck.name, deck.card_count, deck.due_count });
-            }
+            for (decks) |deck| try out.print("{d}  {s}  {d}  {d}\n", .{ deck.id, deck.name, deck.card_count, deck.due_count });
         },
         .deck_add => |args| {
             const id = try store.createDeck(args.name, now_ms);
@@ -192,25 +185,53 @@ fn runWithStore(
         .study => |args| try studyDeck(allocator, io, out, study, args.deck_id),
         .stats => |args| {
             const stats = try store.stats(now_ms, args.deck_id);
-            try out.print("Decks: {d}\nCards: {d}\nDue: {d}\nReviews: {d}\n", .{
-                stats.deck_count,
-                stats.card_count,
-                stats.due_count,
-                stats.review_count,
-            });
+            if (args.json) {
+                try out.print("{{\"decks\":{d},\"cards\":{d},\"due\":{d},\"reviews\":{d}}}\n", .{
+                    stats.deck_count,
+                    stats.card_count,
+                    stats.due_count,
+                    stats.review_count,
+                });
+            } else {
+                try out.print("Decks: {d}\nCards: {d}\nDue: {d}\nReviews: {d}\n", .{
+                    stats.deck_count,
+                    stats.card_count,
+                    stats.due_count,
+                    stats.review_count,
+                });
+            }
         },
         .inspect => |args| {
             const preview = try study.preview(allocator, args.card_id, now_ms);
-            try out.print("Card: {d}\nScheduler: FSRS-{d}\nParameter set: {x}\n", .{
-                args.card_id,
-                preview.algorithm.major,
-                preview.parameter_set_id,
-            });
-            if (preview.retrievability) |value| try out.print("Retrievability: {d:.2}%\n", .{value * 100.0});
-            if (try store.getSchedulerState(args.card_id)) |state| {
-                if (state.stability_days) |value| try out.print("Stability: {d:.3} days\n", .{value});
-                if (state.difficulty) |value| try out.print("Difficulty: {d:.3}\n", .{value});
-                try out.print("Due: {d}\n", .{state.due_at_ms});
+            const state = try store.getSchedulerState(args.card_id);
+            if (args.json) {
+                try out.print("{{\"card_id\":{d},\"scheduler\":\"fsrs/{d}\",\"parameter_set\":\"{x}\",", .{
+                    args.card_id,
+                    preview.algorithm.major,
+                    preview.parameter_set_id,
+                });
+                if (preview.retrievability) |value| {
+                    try out.print("\"retrievability\":{d},", .{value});
+                } else try out.print("\"retrievability\":null,", .{});
+                if (state) |stored| {
+                    if (stored.stability_days) |value| try out.print("\"stability_days\":{d},", .{value}) else try out.print("\"stability_days\":null,", .{});
+                    if (stored.difficulty) |value| try out.print("\"difficulty\":{d},", .{value}) else try out.print("\"difficulty\":null,", .{});
+                    try out.print("\"due_at_ms\":{d}}}\n", .{stored.due_at_ms});
+                } else {
+                    try out.print("\"stability_days\":null,\"difficulty\":null,\"due_at_ms\":null}}\n", .{});
+                }
+            } else {
+                try out.print("Card: {d}\nScheduler: FSRS-{d}\nParameter set: {x}\n", .{
+                    args.card_id,
+                    preview.algorithm.major,
+                    preview.parameter_set_id,
+                });
+                if (preview.retrievability) |value| try out.print("Retrievability: {d:.2}%\n", .{value * 100.0});
+                if (state) |stored| {
+                    if (stored.stability_days) |value| try out.print("Stability: {d:.3} days\n", .{value});
+                    if (stored.difficulty) |value| try out.print("Difficulty: {d:.3}\n", .{value});
+                    try out.print("Due: {d}\n", .{stored.due_at_ms});
+                }
             }
         },
         .fsrs_optimize => |args| {
@@ -219,15 +240,9 @@ fn runWithStore(
             const views = try historyViews(allocator, owned);
             defer allocator.free(views);
             const initial = try baseParameters(store, args.deck_id, now_ms);
-            const result = try fsrs.v7.optimizer.optimize(views, initial, .{
-                .recency_half_life_days = args.recency_half_life_days,
-            });
+            const result = try fsrs.v7.optimizer.optimize(views, initial, .{ .recency_half_life_days = args.recency_half_life_days });
             const id = try store.putFsrs7Parameters(result.parameters, "optimized", now_ms);
-            if (args.deck_id) |deck_id| {
-                try store.setDeckFsrs7(deck_id, id);
-            } else {
-                try store.setGlobalFsrs7(id);
-            }
+            if (args.deck_id) |deck_id| try store.setDeckFsrs7(deck_id, id) else try store.setGlobalFsrs7(id);
             try out.print("Examples: {d}\nLog loss: {d:.6} -> {d:.6}\nParameter set: {x}\n", .{
                 result.examples,
                 result.initial_log_loss,
