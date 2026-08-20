@@ -19,7 +19,8 @@ test "Deez archive round trips immutable history and parameters" {
     const default_id = try catalog.ensureDefaultFsrs7(0);
     const deck_id = try source.createDeck("bson", 0);
     const card_id = try source.createCard(deck_id, "What is BSON?", "Binary JSON", 1);
-    const study = Study.init(&source);
+    var source_store: storage.Store = .{ .sqlite = &source };
+    const study = Study.init(&source_store);
     _ = try study.recordReview(std.testing.allocator, card_id, .good, 2 * time.milliseconds_per_day);
     _ = try study.recordReview(std.testing.allocator, card_id, .hard, 5 * time.milliseconds_per_day);
 
