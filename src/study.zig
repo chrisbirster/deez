@@ -19,14 +19,10 @@ pub const ReviewResult = struct {
 };
 
 pub const Study = struct {
-    db: *storage.Db,
-    catalog: storage.Catalog,
+    store: *storage.Store,
 
-    pub fn init(db: *storage.Db) Study {
-        return .{
-            .db = db,
-            .catalog = .{ .db = db },
-        };
+    pub fn init(store: *storage.Store) Study {
+        return .{ .store = store };
     }
 
     fn fsrs7ForDeck(self: Study, deck_id: card_mod.DeckId, now_ms: time.TimestampMs) !struct {
@@ -34,9 +30,9 @@ pub const Study = struct {
         parameters: fsrs.v7.Parameters,
         engine: fsrs.v7.Engine,
     } {
-        const resolved = try self.catalog.resolveDeckScheduler(deck_id, now_ms);
+        const resolved = try self.store.resolveDeckScheduler(deck_id, now_ms);
         if (!resolved.algorithm.eql(.fsrs7)) return error.UnsupportedAlgorithm;
-        const parameters = try self.catalog.loadFsrs7Parameters(resolved.parameter_set_id);
+        const parameters = try self.store.loadFsrs7Parameters(resolved.parameter_set_id);
         return .{
             .resolved = resolved,
             .parameters = parameters,
@@ -50,10 +46,10 @@ pub const Study = struct {
         card_id: card_mod.CardId,
         now_ms: time.TimestampMs,
     ) !Preview {
-        const card = (try self.db.getCard(allocator, card_id)) orelse return error.CardNotFound;
+        const card = (try self.store.getCard(allocator, card_id)) orelse return error.CardNotFound;
         defer card.deinit(allocator);
         const scheduler = try self.fsrs7ForDeck(card.deck_id, now_ms);
-        const history = try self.db.loadHistory(allocator, card_id);
+        const history = try self.store.loadHistory(allocator, card_id);
         defer allocator.free(history);
 
         const schedule = try scheduler.engine.schedule(history, now_ms);
@@ -110,10 +106,10 @@ pub const Study = struct {
         rating: fsrs.Rating,
         reviewed_at_ms: time.TimestampMs,
     ) !ReviewResult {
-        const card = (try self.db.getCard(allocator, card_id)) orelse return error.CardNotFound;
+        const card = (try self.store.getCard(allocator, card_id)) orelse return error.CardNotFound;
         defer card.deinit(allocator);
         const scheduler = try self.fsrs7ForDeck(card.deck_id, reviewed_at_ms);
-        const history = try self.db.loadHistory(allocator, card_id);
+        const history = try self.store.loadHistory(allocator, card_id);
         defer allocator.free(history);
 
         const schedule = try scheduler.engine.schedule(history, reviewed_at_ms);
@@ -128,17 +124,13 @@ pub const Study = struct {
             candidate.due_at_ms,
         );
 
-        try self.db.beginImmediate();
-        errdefer self.db.rollback();
-        const review_id = try self.catalog.appendReview(
+        const review_id = try self.store.recordReviewAndState(
             card_id,
             rating,
             reviewed_at_ms,
-            state.stamp,
+            state,
             candidate.due_at_ms,
         );
-        try self.catalog.upsertSchedulerState(state);
-        try self.db.commit();
 
         return .{
             .review_id = review_id,
@@ -153,13 +145,13 @@ pub const Study = struct {
         card_id: card_mod.CardId,
         now_ms: time.TimestampMs,
     ) !?storage.SchedulerState {
-        const card = (try self.db.getCard(allocator, card_id)) orelse return error.CardNotFound;
+        const card = (try self.store.getCard(allocator, card_id)) orelse return error.CardNotFound;
         defer card.deinit(allocator);
         const scheduler = try self.fsrs7ForDeck(card.deck_id, now_ms);
-        const history = try self.db.loadHistory(allocator, card_id);
+        const history = try self.store.loadHistory(allocator, card_id);
         defer allocator.free(history);
         if (history.len == 0) {
-            try self.db.clearSchedulerState(card_id);
+            try self.store.clearSchedulerState(card_id);
             return null;
         }
 
@@ -182,7 +174,7 @@ pub const Study = struct {
             .due_at_ms = due_at_ms,
             .last_reviewed_at_ms = replayed.last_reviewed_at_ms,
         };
-        try self.catalog.upsertSchedulerState(state);
+        try self.store.upsertSchedulerState(state);
         return state;
     }
 
@@ -193,7 +185,7 @@ pub const Study = struct {
         now_ms: time.TimestampMs,
         limit: usize,
     ) ![]storage.OwnedDueCard {
-        return self.catalog.dueCards(allocator, deck_id, now_ms, limit);
+        return self.store.dueCards(allocator, deck_id, now_ms, limit);
     }
 };
 
@@ -201,18 +193,19 @@ test "recorded review updates immutable history and derived state" {
     var db = try storage.Db.open(":memory:");
     defer db.close();
     try db.migrate();
-    const study = Study.init(&db);
-    const deck_id = try db.createDeck("bson", 0);
-    const card_id = try db.createCard(deck_id, "What is a byte?", "8 bits", 0);
+    var store: storage.Store = .{ .sqlite = &db };
+    const study = Study.init(&store);
+    const deck_id = try store.createDeck("bson", 0);
+    const card_id = try store.createCard(deck_id, "What is a byte?", "8 bits", 0);
 
     const result = try study.recordReview(std.testing.allocator, card_id, .good, 0);
     try std.testing.expect(result.candidate.due_at_ms > 0);
-    const history = try db.loadHistory(std.testing.allocator, card_id);
+    const history = try store.loadHistory(std.testing.allocator, card_id);
     defer std.testing.allocator.free(history);
     try std.testing.expectEqual(@as(usize, 1), history.len);
     try std.testing.expectEqual(fsrs.Rating.good, history[0].rating);
 
-    const stored = (try study.catalog.getSchedulerState(card_id)).?;
+    const stored = (try store.getSchedulerState(card_id)).?;
     try std.testing.expectApproxEqAbs(result.state.stability_days.?, stored.stability_days.?, 1e-12);
     try std.testing.expectEqual(result.state.due_at_ms, stored.due_at_ms);
 }
@@ -221,16 +214,17 @@ test "derived state rebuilds deterministically from history" {
     var db = try storage.Db.open(":memory:");
     defer db.close();
     try db.migrate();
-    const study = Study.init(&db);
-    const deck_id = try db.createDeck("zig", 0);
-    const card_id = try db.createCard(deck_id, "What is comptime?", "Compile-time evaluation", 0);
+    var store: storage.Store = .{ .sqlite = &db };
+    const study = Study.init(&store);
+    const deck_id = try store.createDeck("zig", 0);
+    const card_id = try store.createCard(deck_id, "What is comptime?", "Compile-time evaluation", 0);
     const day = time.milliseconds_per_day;
     _ = try study.recordReview(std.testing.allocator, card_id, .good, 0);
     _ = try study.recordReview(std.testing.allocator, card_id, .hard, 2 * day);
 
-    const before = (try study.catalog.getSchedulerState(card_id)).?;
-    try db.clearSchedulerState(card_id);
-    try std.testing.expect((try study.catalog.getSchedulerState(card_id)) == null);
+    const before = (try store.getSchedulerState(card_id)).?;
+    try store.clearSchedulerState(card_id);
+    try std.testing.expect((try store.getSchedulerState(card_id)) == null);
     const rebuilt = (try study.rebuildCardState(std.testing.allocator, card_id, 2 * day)).?;
     try std.testing.expectApproxEqAbs(before.stability_days.?, rebuilt.stability_days.?, 1e-12);
     try std.testing.expectApproxEqAbs(before.difficulty.?, rebuilt.difficulty.?, 1e-12);
