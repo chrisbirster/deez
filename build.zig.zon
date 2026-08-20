@@ -4,11 +4,9 @@
     .fingerprint = 0x7346b143bccbdc12, // Changing this has security and trust implications.
     .minimum_zig_version = "0.16.0",
     .dependencies = .{
-        // During Bongo dogfooding both repositories live as siblings. Pin this
-        // to the released Bongo URL/hash before the Deez Mongo backend is
-        // promoted from experimental to a normal release dependency.
         .bongo = .{
-            .path = "../bongo",
+            .url = "git+https://github.com/chrisbirster/bongo#3bd43ccd7bc8ad5698f6c658f04274db384c7ce7",
+            .hash = "bongo-0.3.0-H33KDcaECACx6MHNj-xT3_mju30t5IBQmqjcPw6DxOUM",
         },
     },
     .paths = .{
