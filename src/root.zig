@@ -26,4 +26,5 @@ test {
     std.testing.refAllDecls(@This());
     _ = @import("interchange_test.zig");
     _ = @import("study_replay_tests.zig");
+    _ = @import("terminal_acceptance_test.zig");
 }
