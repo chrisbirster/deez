@@ -14,7 +14,7 @@ pub fn main(init: std.process.Init) !void {
         const stderr = &stderr_file_writer.interface;
         try stderr.print("deez: {s}\n\n{s}", .{ @errorName(err), deez.cli.help_text });
         try stderr.flush();
-        return;
+        std.process.exit(2);
     };
 
     try deez.app.run(init, command);
