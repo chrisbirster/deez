@@ -17,4 +17,5 @@ pub const algorithm_major: u16 = 7;
 
 test {
     std.testing.refAllDecls(@This());
+    _ = @import("parity_tests.zig");
 }
