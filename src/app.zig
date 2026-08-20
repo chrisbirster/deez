@@ -121,7 +121,7 @@ pub fn run(init: std.process.Init, command: cli.Command) !void {
     if (std.mem.eql(u8, backend, "mongodb")) {
         const uri = init.environ_map.get("DEEZ_MONGO_URI") orelse
             return error.MissingMongoUri;
-        var mongo = try storage.MongoStore.connect(io, allocator, uri);
+        const mongo = try storage.MongoStore.connect(io, allocator, uri);
         var store: storage.Store = .{ .mongodb = mongo };
         defer store.deinit();
         return runWithStore(allocator, io, command, &store);
