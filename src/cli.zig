@@ -13,6 +13,12 @@ pub const HelpTopic = enum {
     scheduler,
 };
 
+pub const StudyOrder = enum {
+    due,
+    reviews_first,
+    new_first,
+};
+
 pub const Command = union(enum) {
     help: HelpTopic,
     decks,
@@ -23,7 +29,12 @@ pub const Command = union(enum) {
     card_add: struct { deck_id: DeckId, question: []const u8, answer: []const u8 },
     card_edit: struct { card_id: CardId, question: []const u8, answer: []const u8 },
     card_delete: struct { card_id: CardId },
-    study: struct { deck_id: DeckId },
+    study: struct {
+        deck_id: DeckId,
+        new_limit: ?usize,
+        order: StudyOrder,
+        shuffle: bool,
+    },
     stats: struct { deck_id: ?DeckId, json: bool },
     inspect: struct { card_id: CardId, json: bool },
     fsrs_optimize: struct { deck_id: ?DeckId, recency_half_life_days: ?f64 },
@@ -37,8 +48,19 @@ fn parseId(text: []const u8) !u64 {
     return std.fmt.parseInt(u64, text, 10) catch return error.InvalidId;
 }
 
+fn parseCount(text: []const u8) !usize {
+    return std.fmt.parseInt(usize, text, 10) catch return error.InvalidNumber;
+}
+
 fn parseFloat(text: []const u8) !f64 {
     return std.fmt.parseFloat(f64, text) catch return error.InvalidNumber;
+}
+
+fn parseStudyOrder(text: []const u8) !StudyOrder {
+    if (std.mem.eql(u8, text, "due")) return .due;
+    if (std.mem.eql(u8, text, "reviews-first")) return .reviews_first;
+    if (std.mem.eql(u8, text, "new-first")) return .new_first;
+    return error.InvalidStudyOrder;
 }
 
 fn expectLength(args: []const []const u8, expected: usize) !void {
@@ -135,8 +157,38 @@ pub fn parse(args: []const []const u8) !Command {
     }
     if (std.mem.eql(u8, command, "study")) {
         if (args.len == 3 and isHelp(args[2])) return .{ .help = .study };
-        try expectLength(args, 3);
-        return .{ .study = .{ .deck_id = try parseId(args[2]) } };
+        if (args.len < 3) return error.InvalidArguments;
+
+        const deck_id = try parseId(args[2]);
+        var new_limit: ?usize = null;
+        var order: StudyOrder = .due;
+        var order_set = false;
+        var shuffle = false;
+        var index: usize = 3;
+        while (index < args.len) {
+            if (std.mem.eql(u8, args[index], "--new-limit")) {
+                if (new_limit != null or index + 1 >= args.len) return error.InvalidArguments;
+                new_limit = try parseCount(args[index + 1]);
+                index += 2;
+            } else if (std.mem.eql(u8, args[index], "--order")) {
+                if (order_set or index + 1 >= args.len) return error.InvalidArguments;
+                order = try parseStudyOrder(args[index + 1]);
+                order_set = true;
+                index += 2;
+            } else if (std.mem.eql(u8, args[index], "--shuffle")) {
+                if (shuffle) return error.InvalidArguments;
+                shuffle = true;
+                index += 1;
+            } else {
+                return error.InvalidArguments;
+            }
+        }
+        return .{ .study = .{
+            .deck_id = deck_id,
+            .new_limit = new_limit,
+            .order = order,
+            .shuffle = shuffle,
+        } };
     }
     if (std.mem.eql(u8, command, "stats")) {
         if (args.len == 3 and isHelp(args[2])) return .{ .help = .stats };
@@ -220,7 +272,7 @@ pub const help_text =
     \\  deez card add <deck-id> <question> <answer>
     \\  deez card edit <card-id> <question> <answer>
     \\  deez card delete <card-id> --yes
-    \\  deez study <deck-id>
+    \\  deez study <deck-id> [--new-limit <count>] [--order due|reviews-first|new-first] [--shuffle]
     \\  deez stats [deck-id] [--json]
     \\  deez inspect <card-id> [--json]
     \\  deez fsrs optimize [deck-id] [--recency-days <days>]
@@ -244,7 +296,12 @@ const card_help =
     \\  deez card edit <card-id> <question> <answer>
     \\  deez card delete <card-id> --yes
 ;
-const study_help = "Usage: deez study <deck-id>\n";
+const study_help =
+    \\Study command:
+    \\  deez study <deck-id> [--new-limit <count>] [--order due|reviews-first|new-first] [--shuffle]
+    \\
+    \\Defaults preserve timestamp order and do not limit new cards or shuffle.
+;
 const stats_help = "Usage: deez stats [deck-id] [--json]\n";
 const inspect_help = "Usage: deez inspect <card-id> [--json]\n";
 const fsrs_help =
@@ -273,6 +330,26 @@ test "parse study command" {
     const args = [_][]const u8{ "deez", "study", "42" };
     const command = try parse(&args);
     try std.testing.expectEqual(@as(DeckId, 42), command.study.deck_id);
+    try std.testing.expectEqual(@as(?usize, null), command.study.new_limit);
+    try std.testing.expectEqual(StudyOrder.due, command.study.order);
+    try std.testing.expect(!command.study.shuffle);
+}
+
+test "parse study queue options" {
+    const args = [_][]const u8{
+        "deez",
+        "study",
+        "42",
+        "--new-limit",
+        "10",
+        "--order",
+        "reviews-first",
+        "--shuffle",
+    };
+    const command = try parse(&args);
+    try std.testing.expectEqual(@as(?usize, 10), command.study.new_limit);
+    try std.testing.expectEqual(StudyOrder.reviews_first, command.study.order);
+    try std.testing.expect(command.study.shuffle);
 }
 
 test "parse card listing and add commands" {
@@ -329,6 +406,9 @@ test "invalid ids and missing required arguments are rejected" {
     const invalid_id = [_][]const u8{ "deez", "cards", "nope" };
     try std.testing.expectError(error.InvalidId, parse(&invalid_id));
 
+    const invalid_order = [_][]const u8{ "deez", "study", "1", "--order", "random" };
+    try std.testing.expectError(error.InvalidStudyOrder, parse(&invalid_order));
+
     const cases = [_][]const []const u8{
         &.{ "deez", "deck" },
         &.{ "deez", "deck", "add" },
@@ -339,7 +419,7 @@ test "invalid ids and missing required arguments are rejected" {
         &.{ "deez", "inspect" },
         &.{ "deez", "fsrs" },
     };
-    for (cases) |args| try std.testing.expectError(error.InvalidArguments, parse(args));
+    for (cases) |case_args| try std.testing.expectError(error.InvalidArguments, parse(case_args));
 }
 
 test "unknown command is rejected" {
