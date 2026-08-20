@@ -68,19 +68,18 @@ fn studyDeck(
     out: *Io.Writer,
     study: study_mod.Study,
     deck_id: u64,
+    options: study_mod.SessionOptions,
 ) !void {
+    var session = study_mod.Session.init(study, deck_id, options);
     while (true) {
-        const due = try study.dueCards(allocator, deck_id, nowMs(io), 1);
-        defer {
-            for (due) |card| card.deinit(allocator);
-            allocator.free(due);
-        }
-        if (due.len == 0) {
+        const maybe_card = try session.next(allocator, nowMs(io));
+        if (maybe_card == null) {
             try out.print("No cards due.\n", .{});
             return;
         }
 
-        const card = due[0];
+        const card = maybe_card.?;
+        defer card.deinit(allocator);
         try out.print("\n{s}\n\n[press enter to reveal]", .{card.question});
         try out.flush();
         try waitForEnter(io);
@@ -191,7 +190,15 @@ fn runWithStore(
             try store.deleteCard(args.card_id);
             try out.print("Deleted card {d}.\n", .{args.card_id});
         },
-        .study => |args| try studyDeck(allocator, io, out, study, args.deck_id),
+        .study => |args| try studyDeck(allocator, io, out, study, args.deck_id, .{
+            .new_limit = args.new_limit,
+            .review_order = switch (args.order) {
+                .due => .due,
+                .reviews_first => .reviews_first,
+                .new_first => .new_first,
+            },
+            .shuffle_seed = if (args.shuffle) @as(u64, @bitCast(now_ms)) else null,
+        }),
         .stats => |args| {
             const stats = try store.stats(now_ms, args.deck_id);
             if (args.json) {
