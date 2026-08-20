@@ -7,6 +7,7 @@ pub const store = @import("store.zig");
 pub const catalog = @import("catalog.zig");
 pub const report = @import("report.zig");
 pub const backup = @import("backup.zig");
+pub const recovery = @import("recovery.zig");
 
 pub const Db = sqlite.Db;
 pub const Store = store.Store;
@@ -23,6 +24,12 @@ pub const Report = report.Report;
 pub const DeckSummary = report.DeckSummary;
 pub const Stats = report.Stats;
 pub const OwnedHistories = report.OwnedHistories;
+
+pub const IntegrityResult = recovery.IntegrityResult;
+
+pub fn checkIntegrity(allocator: std.mem.Allocator, db: *Db) !IntegrityResult {
+    return recovery.check(allocator, db);
+}
 
 test {
     std.testing.refAllDecls(@This());
