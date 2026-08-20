@@ -355,7 +355,8 @@ pub const Store = struct {
             .null_value => return null,
             else => return error.InvalidField,
         };
-        return parseSchedulerState(card_id, document);
+        const state = try parseSchedulerState(card_id, document);
+        return state;
     }
 
     pub fn dueCards(
