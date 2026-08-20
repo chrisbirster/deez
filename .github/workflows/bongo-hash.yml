@@ -1,0 +1,16 @@
+name: Compute Bongo package hash
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  hash:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+      - name: Compute corrected Bongo 0.3.0 package hash
+        run: zig fetch "git+https://github.com/chrisbirster/bongo#631bb812777af587162daa650b53f48196960d55"
