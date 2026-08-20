@@ -12,8 +12,9 @@ pub fn list(
     deck_id: card_mod.DeckId,
 ) ![]sqlite.OwnedCard {
     var stmt: ?*c.sqlite3_stmt = null;
+    const handle: ?*c.sqlite3 = @ptrCast(db.handle);
     if (c.sqlite3_prepare_v2(
-        db.handle,
+        handle,
         "SELECT id, deck_id, question, answer FROM cards WHERE deck_id = ?1 ORDER BY id;",
         -1,
         &stmt,
