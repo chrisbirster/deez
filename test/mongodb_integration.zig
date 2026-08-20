@@ -267,7 +267,7 @@ test "MongoStore study session enforces new limit and relearning due time" {
         .review_order = .new_first,
     });
 
-    var first = (try session.next(allocator, 0)).?;
+    const first = (try session.next(allocator, 0)).?;
     try std.testing.expectEqual(first_id, first.id);
     first.deinit(allocator);
 
@@ -278,7 +278,7 @@ test "MongoStore study session enforces new limit and relearning due time" {
         .new_limit = 0,
         .review_order = .reviews_first,
     });
-    var due_review = (try review_session.next(allocator, learned.candidate.due_at_ms)).?;
+    const due_review = (try review_session.next(allocator, learned.candidate.due_at_ms)).?;
     try std.testing.expectEqual(first_id, due_review.id);
     due_review.deinit(allocator);
 
@@ -294,7 +294,7 @@ test "MongoStore study session enforces new limit and relearning due time" {
         );
     }
 
-    var relearning = (try review_session.next(allocator, lapse.candidate.due_at_ms)).?;
+    const relearning = (try review_session.next(allocator, lapse.candidate.due_at_ms)).?;
     try std.testing.expectEqual(first_id, relearning.id);
     relearning.deinit(allocator);
 }
