@@ -23,9 +23,47 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev
       - name: Start MongoDB replica set
         run: bash ./bongo-fixture/scripts/start-replica-db.sh
+      - name: Start standalone MongoDB fixture
+        run: |
+          docker rm -f mongodb >/dev/null 2>&1 || true
+          bash ./bongo-fixture/scripts/start-db.sh
+          for attempt in $(seq 1 60); do
+            if docker exec mongodb mongosh \
+                --quiet \
+                --username admin \
+                --password secretpassword \
+                --authenticationDatabase admin \
+                --eval 'quit(db.runCommand({ping:1}).ok === 1 ? 0 : 1)' \
+                >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs mongodb >&2 || true
+          exit 1
+      - name: Start TLS MongoDB fixture
+        run: bash ./bongo-fixture/scripts/start-tls-db.sh
       - name: Test MongoStore against pinned Bongo 0.3.0 package
         working-directory: deez
         run: zig build mongo-integration-test
-      - name: Stop MongoDB fixture
+      - name: Verify MongoStore indexes
+        run: |
+          docker exec mongodb-rs mongosh --quiet --eval '
+            const target = db.getSiblingDB("deez_integration");
+            const cardIndexes = target.cards.getIndexes().map((index) => index.name);
+            const reviewIndexes = target.reviews.getIndexes().map((index) => index.name);
+            if (!cardIndexes.includes("deck_due_id")) {
+              print("missing deck_due_id index");
+              quit(1);
+            }
+            if (!reviewIndexes.includes("card_history")) {
+              print("missing card_history index");
+              quit(1);
+            }
+          '
+      - name: Stop MongoDB fixtures
         if: always()
-        run: docker rm -f mongodb-rs >/dev/null 2>&1 || true
+        run: |
+          docker rm -f mongodb-rs >/dev/null 2>&1 || true
+          docker rm -f mongodb >/dev/null 2>&1 || true
+          docker rm -f mongodb-tls >/dev/null 2>&1 || true
