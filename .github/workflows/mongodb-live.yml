@@ -14,16 +14,16 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: chrisbirster/bongo
-          ref: bongo-deez-readiness
-          path: bongo
+          ref: 3bd43ccd7bc8ad5698f6c658f04274db384c7ce7
+          path: bongo-fixture
       - uses: mlugg/setup-zig@v2
         with:
           version: 0.16.0
       - name: Install SQLite headers
         run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev
       - name: Start MongoDB replica set
-        run: bash ./bongo/scripts/start-replica-db.sh
-      - name: Test MongoStore
+        run: bash ./bongo-fixture/scripts/start-replica-db.sh
+      - name: Test MongoStore against pinned Bongo 0.3.0 package
         working-directory: deez
         run: zig build mongo-integration-test
       - name: Stop MongoDB fixture
