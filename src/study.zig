@@ -299,8 +299,6 @@ pub const Session = struct {
         allocator: std.mem.Allocator,
         now_ms: time.TimestampMs,
     ) !?storage.OwnedDueCard {
-        // Storage performs timestamp eligibility. The session layer applies
-        // policy without teaching SQLite or MongoDB about study UX.
         const scan_limit: usize = std.math.maxInt(i32);
         const due = try self.study.dueCards(allocator, self.deck_id, now_ms, scan_limit);
         defer allocator.free(due);
@@ -396,7 +394,7 @@ test "study session supports review ordering and a session-wide new-card limit" 
     _ = try store.createCard(deck_id, "new-b", "b", 2);
 
     var reviews_first = Session.init(study, deck_id, .{ .review_order = .reviews_first });
-    var selected_review = (try reviews_first.next(allocator, now_ms)).?;
+    const selected_review = (try reviews_first.next(allocator, now_ms)).?;
     try std.testing.expectEqual(review_card, selected_review.id);
     selected_review.deinit(allocator);
 
@@ -404,13 +402,13 @@ test "study session supports review ordering and a session-wide new-card limit" 
         .new_limit = 1,
         .review_order = .new_first,
     });
-    var selected_new = (try new_first.next(allocator, now_ms)).?;
+    const selected_new = (try new_first.next(allocator, now_ms)).?;
     try std.testing.expectEqual(new_a, selected_new.id);
     const selected_new_id = selected_new.id;
     selected_new.deinit(allocator);
     _ = try study.recordReview(allocator, selected_new_id, .good, now_ms);
 
-    var after_limit = (try new_first.next(allocator, now_ms)).?;
+    const after_limit = (try new_first.next(allocator, now_ms)).?;
     try std.testing.expectEqual(review_card, after_limit.id);
     after_limit.deinit(allocator);
 }
@@ -428,15 +426,15 @@ test "study session is deterministic unless shuffle is explicitly enabled" {
     _ = try store.createCard(deck_id, "three", "3", 0);
 
     var deterministic = Session.init(study, deck_id, .{});
-    var deterministic_card = (try deterministic.next(allocator, 0)).?;
+    const deterministic_card = (try deterministic.next(allocator, 0)).?;
     try std.testing.expectEqual(first, deterministic_card.id);
     deterministic_card.deinit(allocator);
 
     var shuffled_a = Session.init(study, deck_id, .{ .shuffle_seed = 42 });
     var shuffled_b = Session.init(study, deck_id, .{ .shuffle_seed = 42 });
-    var shuffled_card_a = (try shuffled_a.next(allocator, 0)).?;
+    const shuffled_card_a = (try shuffled_a.next(allocator, 0)).?;
     defer shuffled_card_a.deinit(allocator);
-    var shuffled_card_b = (try shuffled_b.next(allocator, 0)).?;
+    const shuffled_card_b = (try shuffled_b.next(allocator, 0)).?;
     defer shuffled_card_b.deinit(allocator);
     try std.testing.expectEqual(shuffled_card_a.id, shuffled_card_b.id);
 }
@@ -453,7 +451,7 @@ test "relearning card re-enters the same session at its exact due timestamp" {
 
     const learned = try study.recordReview(allocator, card_id, .good, 0);
     var session = Session.init(study, deck_id, .{ .review_order = .reviews_first });
-    var due_review = (try session.next(allocator, learned.candidate.due_at_ms)).?;
+    const due_review = (try session.next(allocator, learned.candidate.due_at_ms)).?;
     try std.testing.expectEqual(card_id, due_review.id);
     due_review.deinit(allocator);
 
@@ -465,11 +463,11 @@ test "relearning card re-enters the same session at its exact due timestamp" {
         try std.testing.expect((try session.next(allocator, lapse.candidate.due_at_ms - 1)) == null);
     }
 
-    var relearning = (try session.next(allocator, lapse.candidate.due_at_ms)).?;
+    const relearning = (try session.next(allocator, lapse.candidate.due_at_ms)).?;
     try std.testing.expectEqual(card_id, relearning.id);
     relearning.deinit(allocator);
 
-    var overdue = (try session.next(allocator, lapse.candidate.due_at_ms + 1)).?;
+    const overdue = (try session.next(allocator, lapse.candidate.due_at_ms + 1)).?;
     try std.testing.expectEqual(card_id, overdue.id);
     overdue.deinit(allocator);
 }
