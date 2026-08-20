@@ -66,20 +66,17 @@ test "card listing includes new and scheduled cards deterministically" {
     const study = study_mod.Study.init(&store);
     _ = try study.recordReview(std.testing.allocator, first, .easy, 0);
 
-    const cards = try store.dueCards(
-        std.testing.allocator,
-        deck_id,
-        std.math.maxInt(i64),
-        std.math.maxInt(usize),
-    );
+    const cards = try store.cards(std.testing.allocator, deck_id);
     defer {
         for (cards) |card| card.deinit(std.testing.allocator);
         std.testing.allocator.free(cards);
     }
 
     try std.testing.expectEqual(@as(usize, 2), cards.len);
-    try std.testing.expectEqual(second, cards[0].id);
-    try std.testing.expectEqual(first, cards[1].id);
+    try std.testing.expectEqual(first, cards[0].id);
+    try std.testing.expectEqual(second, cards[1].id);
+    try std.testing.expectEqualStrings("first", cards[0].question);
+    try std.testing.expectEqualStrings("second", cards[1].question);
 }
 
 test "stats and scheduler inspection data cover empty and populated stores" {
