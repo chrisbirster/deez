@@ -11,6 +11,17 @@ fn printErrorAndExit(init: std.process.Init, err: anyerror, help: []const u8) no
     std.process.exit(2);
 }
 
+fn isBackupUsageError(err: anyerror) bool {
+    return switch (err) {
+        error.InvalidArguments,
+        error.InvalidId,
+        error.ConfirmationRequired,
+        error.UnknownCommand,
+        => true,
+        else => false,
+    };
+}
+
 pub fn main(init: std.process.Init) !void {
     const arena = init.arena.allocator();
     const raw_args = try init.minimal.args.toSlice(arena);
@@ -18,7 +29,10 @@ pub fn main(init: std.process.Init) !void {
     for (raw_args, 0..) |arg, index| args[index] = arg;
 
     if (deez.backup_cli.isCommand(args)) {
-        deez.backup_cli.run(init, args) catch |err| printErrorAndExit(init, err, deez.backup_cli.help_text);
+        deez.backup_cli.run(init, args) catch |err| {
+            if (isBackupUsageError(err)) printErrorAndExit(init, err, deez.backup_cli.help_text);
+            return err;
+        };
         return;
     }
 
