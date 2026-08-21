@@ -11,6 +11,7 @@ pub const recovery = @import("recovery.zig");
 pub const parameter_lifecycle = @import("parameter_lifecycle.zig");
 pub const scheduler_migration = @import("scheduler_migration.zig");
 pub const cli = @import("cli.zig");
+pub const backup_cli = @import("backup_cli.zig");
 pub const app = @import("app.zig");
 pub const interchange = @import("interchange.zig");
 pub const interchange_import = @import("interchange_import.zig");
