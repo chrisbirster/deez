@@ -5,6 +5,7 @@ pub const parameters = @import("parameters.zig");
 pub const scheduler = @import("scheduler.zig");
 pub const optimizer = @import("optimizer.zig");
 pub const evaluator = @import("evaluator.zig");
+pub const time_series_split = @import("time_series_split.zig");
 pub const simulator = @import("simulator.zig");
 pub const trajectory = @import("trajectory.zig");
 pub const forecast = @import("forecast.zig");
