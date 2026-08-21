@@ -61,6 +61,30 @@ jobs:
               quit(1);
             }
           '
+      - name: Mongo benchmark context
+        working-directory: deez
+        run: |
+          echo "commit=${GITHUB_SHA}"
+          echo "zig=$(zig version)"
+          echo "bongo=0.4.0"
+          echo "bongo_commit=8184b6266bab78fd3eb7fd8d2318f79f90e51937"
+          echo "mongodb=$(docker exec mongodb-rs mongosh --quiet --eval 'db.version()')"
+          uname -a
+          lscpu
+          free -h
+      - name: Mongo benchmark median baseline
+        working-directory: deez
+        env:
+          DEEZ_MONGO_BENCH_URI: mongodb://localhost:27019/deez_benchmark?replicaSet=rs0
+        run: |
+          zig build benchmark -Doptimize=ReleaseFast >/tmp/deez-mongo-bench-warmup.txt
+          for run in 1 2 3 4 5; do
+            zig build benchmark -Doptimize=ReleaseFast >"/tmp/deez-mongo-bench-${run}.txt"
+            cat "/tmp/deez-mongo-bench-${run}.txt"
+          done
+          value=$(grep '^mongo_due_queue_25x_1000_cards_ns=' /tmp/deez-mongo-bench-[1-5].txt | awk -F= '{print $2}' | sort -n | sed -n '3p')
+          test -n "$value"
+          echo "median_mongo_due_queue_25x_1000_cards_ns=${value}"
       - name: Stop MongoDB fixtures
         if: always()
         run: |
