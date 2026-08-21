@@ -194,6 +194,7 @@ pub const Store = union(enum) {
         deck_id: card_mod.DeckId,
         parameter_set_id: fsrs.ParameterSetId,
     ) !void {
+        _ = try self.loadFsrs7Parameters(parameter_set_id);
         switch (self.*) {
             .sqlite => |db| try (catalog_mod.Catalog{ .db = db }).setDeckFsrs7(deck_id, parameter_set_id),
             .mongodb => |*store| try store.setDeckFsrs7(deck_id, parameter_set_id),
