@@ -93,8 +93,16 @@ fn saveConfig(init: std.process.Init, allocator: std.mem.Allocator, selection: S
     file.setPermissions(init.io, @enumFromInt(0o600)) catch {};
 
     switch (selection.backend) {
-        .sqlite => try file.writeStreamingAll(init.io, &.{ "sqlite\n", selection.sqlite_path.?, "\n" }),
-        .mongodb => try file.writeStreamingAll(init.io, &.{ "mongodb\n", selection.mongo_uri.?, "\n" }),
+        .sqlite => {
+            try file.writeStreamingAll(init.io, "sqlite\n");
+            try file.writeStreamingAll(init.io, selection.sqlite_path.?);
+            try file.writeStreamingAll(init.io, "\n");
+        },
+        .mongodb => {
+            try file.writeStreamingAll(init.io, "mongodb\n");
+            try file.writeStreamingAll(init.io, selection.mongo_uri.?);
+            try file.writeStreamingAll(init.io, "\n");
+        },
     }
 }
 
