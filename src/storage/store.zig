@@ -172,7 +172,13 @@ pub const Store = union(enum) {
     ) !catalog_mod.ResolvedScheduler {
         return switch (self.*) {
             .sqlite => |db| (catalog_mod.Catalog{ .db = db }).resolveDeckScheduler(deck_id, now_ms),
-            .mongodb => |*store| store.resolveDeckScheduler(deck_id, now_ms),
+            .mongodb => |*store| blk: {
+                const deck = (try store.getDeck(store.allocator, deck_id)) orelse
+                    return error.DeckNotFound;
+                defer deck.deinit(store.allocator);
+                if (!deck.algorithm.eql(.fsrs7)) return error.UnsupportedAlgorithm;
+                break :blk try store.resolveDeckScheduler(deck_id, now_ms);
+            },
         };
     }
 
