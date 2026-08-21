@@ -76,17 +76,18 @@ jobs:
           median archive_dry_run_100x_1000_cards_ns
 
   macos-release-smoke:
-    runs-on: macos-15
+    strategy:
+      matrix:
+        runner:
+          - macos-15
+          - macos-15-intel
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
       - uses: mlugg/setup-zig@v2
         with:
           version: 0.16.0
-      - name: Build and run Apple Silicon release binary
-        run: |
-          zig build -Doptimize=ReleaseFast -Dtarget=aarch64-macos
-          ./zig-out/bin/deez --help >/dev/null
-      - name: Cross-build Intel release binary
-        run: |
-          rm -rf zig-out
-          zig build -Doptimize=ReleaseFast -Dtarget=x86_64-macos
+      - name: Build native release binary
+        run: zig build -Doptimize=ReleaseFast
+      - name: Run release binary
+        run: ./zig-out/bin/deez --help >/dev/null
