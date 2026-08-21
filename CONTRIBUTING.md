@@ -21,9 +21,11 @@ Storage APIs are operation-oriented. Do not add a fake generic SQL/Mongo query l
 
 ## MongoDB/Bongo
 
-Bongo v0.3.0 is a frozen external dependency. Deez must use Bongo's public APIs and must not work around Bongo internals.
+Bongo v0.4.0 is the pinned external MongoDB dependency. Deez currently pins commit `8184b6266bab78fd3eb7fd8d2318f79f90e51937` and must use Bongo's public APIs rather than reaching into Bongo internals.
 
 New persistence behavior should be exercised against the MongoDB integration fixture when it affects production data. Replica-set transaction behavior and standalone fallback behavior are intentionally different and must remain explicit.
+
+Do not track an unreleased Bongo branch from Deez. A Bongo upgrade should be a deliberate dependency change with a consumer-boundary test run and a documented pin/hash.
 
 ## FSRS parity
 
@@ -67,6 +69,14 @@ Property/fuzz regressions should retain a deterministic seed or fixed regression
 ```bash
 zig build test --fuzz
 ```
+
+Performance-sensitive changes should record the benchmark harness before and after on comparable hardware:
+
+```bash
+zig build benchmark -Doptimize=ReleaseFast
+```
+
+Set `DEEZ_MONGO_BENCH_URI` when the change can affect Mongo due-queue performance.
 
 ## Pull requests
 
