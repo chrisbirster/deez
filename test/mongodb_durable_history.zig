@@ -79,3 +79,38 @@ test "MongoStore rejects scheduler state for a different card" {
     defer std.testing.allocator.free(history);
     try std.testing.expectEqual(@as(usize, 0), history.len);
 }
+
+test "Store deletion cannot discard Mongo immutable review history" {
+    const allocator = std.testing.allocator;
+    var store = try connectStore();
+    defer store.deinit();
+
+    const deck_id = try store.createDeck("mongo-immutable-delete", 0);
+    const reviewed_card = try store.createCard(deck_id, "reviewed", "keep", 0);
+    const untouched_card = try store.createCard(deck_id, "untouched", "keep", 1);
+
+    // Cleanup intentionally bypasses the Deez Store deletion invariant. This is
+    // integration-fixture teardown only; production callers use Store.
+    defer {
+        const db = store.mongodb.client.databaseName();
+        _ = store.mongodb.client.deleteOne(db, "reviews", .{ .card_id = @as(i64, @intCast(reviewed_card)) }) catch {};
+        _ = store.mongodb.client.deleteOne(db, "cards", .{ ._id = @as(i64, @intCast(reviewed_card)) }) catch {};
+        _ = store.mongodb.client.deleteOne(db, "cards", .{ ._id = @as(i64, @intCast(untouched_card)) }) catch {};
+        _ = store.mongodb.client.deleteOne(db, "decks", .{ ._id = @as(i64, @intCast(deck_id)) }) catch {};
+    }
+
+    _ = try store.ensureDefaultFsrs7(0);
+    const study = deez.Study.init(&store);
+    _ = try study.recordReview(allocator, reviewed_card, .good, 0);
+
+    try std.testing.expectError(error.ReviewHistoryExists, store.deleteCard(reviewed_card));
+    const history = try store.loadHistory(allocator, reviewed_card);
+    defer allocator.free(history);
+    try std.testing.expectEqual(@as(usize, 1), history.len);
+
+    try std.testing.expectError(error.ReviewHistoryExists, store.deleteDeck(deck_id));
+    const reviewed_after = (try store.getCard(allocator, reviewed_card)) orelse return error.ReviewedCardWasDeleted;
+    reviewed_after.deinit(allocator);
+    const untouched_after = (try store.getCard(allocator, untouched_card)) orelse return error.DeckDeleteWasPartial;
+    untouched_after.deinit(allocator);
+}
