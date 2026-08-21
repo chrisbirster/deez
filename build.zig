@@ -73,6 +73,7 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
             .imports = &.{
                 .{ .name = "deez", .module = mod },
+                .{ .name = "bongo", .module = bongo_dependency.module("bongo") },
             },
         }),
     });
