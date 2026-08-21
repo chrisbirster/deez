@@ -58,7 +58,7 @@ test "MongoStore preserves immutable versioned FSRS parameter sets" {
         store.resolveDeckScheduler(deck_id, 4),
     );
 
-    var missing: deez.fsrs.ParameterSetId = [_]u8{0xff} ** 32;
+    const missing: deez.fsrs.ParameterSetId = [_]u8{0xff} ** 32;
     try std.testing.expectError(
         error.ParameterSetNotFound,
         store.setDeckFsrs7(deck_id, missing),
