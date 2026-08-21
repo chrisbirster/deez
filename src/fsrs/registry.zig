@@ -1,6 +1,8 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const AlgorithmId = @import("algorithm.zig").AlgorithmId;
-const Engine = @import("engine.zig").Engine;
+const engine_mod = @import("engine.zig");
+const Engine = engine_mod.Engine;
 
 pub const Capabilities = struct {
     schedule: bool,
@@ -36,12 +38,28 @@ pub const fsrs7: Descriptor = .{
     },
 };
 
+const fixture: Descriptor = .{
+    .algorithm = engine_mod.fixture_algorithm,
+    .name = "test-fixture",
+    .status = .supported,
+    .capabilities = .{
+        .schedule = true,
+        .optimize = false,
+        .evaluate = false,
+        .simulate = false,
+        .retention_analysis = false,
+        .replay_history = true,
+    },
+};
+
+/// Published production engines. Test fixtures are intentionally absent.
 pub const supported = [_]Descriptor{fsrs7};
 
 pub fn lookup(algorithm: AlgorithmId) ?Descriptor {
     for (supported) |descriptor| {
         if (descriptor.algorithm.eql(algorithm)) return descriptor;
     }
+    if (builtin.is_test and algorithm.eql(fixture.algorithm)) return fixture;
     return null;
 }
 
@@ -57,4 +75,13 @@ test "registry resolves FSRS-7 and rejects unpublished FSRS-8" {
         error.UnsupportedAlgorithm,
         createDefault(.{ .family = .fsrs, .major = 8 }),
     );
+}
+
+test "registry resolves fixture engine only in tests" {
+    const descriptor = lookup(engine_mod.fixture_algorithm) orelse return error.MissingFixture;
+    try std.testing.expect(descriptor.capabilities.schedule);
+    try std.testing.expect(!descriptor.capabilities.optimize);
+    const fixture_engine = try createDefault(engine_mod.fixture_algorithm);
+    try std.testing.expect(fixture_engine.algorithm().eql(engine_mod.fixture_algorithm));
+    try std.testing.expectEqual(@as(usize, 1), supported.len);
 }
