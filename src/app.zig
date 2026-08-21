@@ -1,6 +1,8 @@
 const std = @import("std");
 const Io = std.Io;
 const cli = @import("cli.zig");
+const config = @import("config.zig");
+const deck_json = @import("deck_json.zig");
 const fsrs = @import("fsrs/root.zig");
 const storage = @import("storage/root.zig");
 const study_mod = @import("study.zig");
@@ -111,24 +113,24 @@ pub fn run(init: std.process.Init, command: cli.Command) !void {
     const allocator = init.gpa;
     const io = init.io;
     const arena = init.arena.allocator();
-    const backend = init.environ_map.get("DEEZ_STORAGE") orelse "sqlite";
+    const selection = try config.resolve(init);
 
-    if (std.mem.eql(u8, backend, "mongodb")) {
-        const uri = init.environ_map.get("DEEZ_MONGO_URI") orelse return error.MissingMongoUri;
-        const mongo = try storage.MongoStore.connect(io, allocator, uri);
-        var store: storage.Store = .{ .mongodb = mongo };
-        defer store.deinit();
-        return runWithStore(allocator, io, command, &store);
+    switch (selection.backend) {
+        .mongodb => {
+            const mongo = try storage.MongoStore.connect(io, allocator, selection.mongo_uri.?);
+            var store: storage.Store = .{ .mongodb = mongo };
+            defer store.deinit();
+            return runWithStore(allocator, io, command, &store);
+        },
+        .sqlite => {
+            const db_path_z = try arena.dupeZ(u8, selection.sqlite_path.?);
+            var db = try storage.Db.open(db_path_z);
+            defer db.close();
+            try db.migrate();
+            var store: storage.Store = .{ .sqlite = &db };
+            return runWithStore(allocator, io, command, &store);
+        },
     }
-
-    if (!std.mem.eql(u8, backend, "sqlite")) return error.UnsupportedStorageBackend;
-    const db_path = init.environ_map.get("DEEZ_DB") orelse "deez.db";
-    const db_path_z = try arena.dupeZ(u8, db_path);
-    var db = try storage.Db.open(db_path_z);
-    defer db.close();
-    try db.migrate();
-    var store: storage.Store = .{ .sqlite = &db };
-    return runWithStore(allocator, io, command, &store);
 }
 
 fn runWithStore(
@@ -177,6 +179,13 @@ fn runWithStore(
         .deck_delete => |args| {
             try store.deleteDeck(args.deck_id);
             try out.print("Deleted deck {d}.\n", .{args.deck_id});
+        },
+        .deck_export => |args| try deck_json.exportDeck(allocator, store, args.deck_id, out),
+        .deck_import => |args| {
+            const bytes = try Io.Dir.cwd().readFileAlloc(io, args.path, allocator, .limited(64 * 1024 * 1024));
+            defer allocator.free(bytes);
+            const result = try deck_json.importSlice(allocator, store, bytes, now_ms);
+            try out.print("Imported deck {d} ({d} cards).\n", .{ result.deck_id, result.card_count });
         },
         .card_add => |args| {
             const id = try store.createCard(args.deck_id, args.question, args.answer, now_ms);
