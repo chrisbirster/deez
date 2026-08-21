@@ -376,6 +376,10 @@ fn nextField(fields: *std.mem.SplitIterator(u8, .scalar)) ![]const u8 {
     return fields.next() orelse error.InvalidFieldCount;
 }
 
+fn stripCr(line: []const u8) []const u8 {
+    return if (line.len > 0 and line[line.len - 1] == '\r') line[0 .. line.len - 1] else line;
+}
+
 fn parseI64(text: []const u8) !i64 {
     return std.fmt.parseInt(i64, text, 10) catch return error.InvalidInteger;
 }
@@ -405,6 +409,10 @@ fn optionalIdText(text: []const u8) !?[32]u8 {
     return try decodeId(text);
 }
 
+fn requireFsrs7(major: i32) !void {
+    if (major != 7) return error.UnsupportedAlgorithm;
+}
+
 fn findParameter(archive: *Archive, id: [32]u8) ?*ParameterRecord {
     for (archive.parameters.items) |*parameter| {
         if (std.mem.eql(u8, parameter.id[0..], id[0..])) return parameter;
@@ -420,7 +428,7 @@ fn parseArchive(allocator: Allocator, bytes: []const u8) !Archive {
     var lines = std.mem.splitScalar(u8, bytes, '\n');
     _ = lines.next();
     while (lines.next()) |raw| {
-        const line = std.mem.trimRight(u8, raw, "\r");
+        const line = stripCr(raw);
         if (line.len == 0) continue;
         var fields = std.mem.splitScalar(u8, line, '\t');
         const kind = try nextField(&fields);
@@ -428,30 +436,25 @@ fn parseArchive(allocator: Allocator, bytes: []const u8) !Archive {
         if (std.mem.eql(u8, kind, "PARAM")) {
             const id = try decodeId(try nextField(&fields));
             if (!std.mem.eql(u8, try nextField(&fields), "fsrs")) return error.UnsupportedAlgorithmFamily;
-            const source_hex = try nextField(&fields);
-            const source = blk: {
-                const algorithm_major = try parseI32(try nextField(&fields));
-                const implementation_major = try parseI32(try nextField(&fields));
-                const implementation_minor = try parseI32(try nextField(&fields));
-                const implementation_patch = try parseI32(try nextField(&fields));
-                const encoded_source = try nextField(&fields);
-                const decoded_source = try decodeHex(allocator, encoded_source);
-                errdefer allocator.free(decoded_source);
-                try archive.parameters.append(allocator, .{
-                    .id = id,
-                    .algorithm_major = algorithm_major,
-                    .implementation_major = implementation_major,
-                    .implementation_minor = implementation_minor,
-                    .implementation_patch = implementation_patch,
-                    .source = decoded_source,
-                    .desired_retention = try parseF64(try nextField(&fields)),
-                    .minimum_interval_days = try parseF64(try nextField(&fields)),
-                    .maximum_interval_days = try parseF64(try nextField(&fields)),
-                    .created_at_ms = try parseI64(try nextField(&fields)),
-                });
-                break :blk source_hex;
-            };
-            _ = source;
+            const algorithm_major = try parseI32(try nextField(&fields));
+            try requireFsrs7(algorithm_major);
+            const implementation_major = try parseI32(try nextField(&fields));
+            const implementation_minor = try parseI32(try nextField(&fields));
+            const implementation_patch = try parseI32(try nextField(&fields));
+            const source = try decodeHex(allocator, try nextField(&fields));
+            errdefer allocator.free(source);
+            try archive.parameters.append(allocator, .{
+                .id = id,
+                .algorithm_major = algorithm_major,
+                .implementation_major = implementation_major,
+                .implementation_minor = implementation_minor,
+                .implementation_patch = implementation_patch,
+                .source = source,
+                .desired_retention = try parseF64(try nextField(&fields)),
+                .minimum_interval_days = try parseF64(try nextField(&fields)),
+                .maximum_interval_days = try parseF64(try nextField(&fields)),
+                .created_at_ms = try parseI64(try nextField(&fields)),
+            });
             continue;
         }
 
@@ -467,8 +470,10 @@ fn parseArchive(allocator: Allocator, bytes: []const u8) !Archive {
 
         if (std.mem.eql(u8, kind, "DEFAULT")) {
             if (!std.mem.eql(u8, try nextField(&fields), "fsrs")) return error.UnsupportedAlgorithmFamily;
+            const major = try parseI32(try nextField(&fields));
+            try requireFsrs7(major);
             archive.default = .{
-                .algorithm_major = try parseI32(try nextField(&fields)),
+                .algorithm_major = major,
                 .parameter_set_id = try optionalIdText(try nextField(&fields)),
             };
             continue;
@@ -481,10 +486,12 @@ fn parseArchive(allocator: Allocator, bytes: []const u8) !Archive {
             const family = try nextField(&fields);
             const major_text = try nextField(&fields);
             if (!std.mem.eql(u8, family, "-") and !std.mem.eql(u8, family, "fsrs")) return error.UnsupportedAlgorithmFamily;
+            const major = try optionalI32Text(major_text);
+            if (major) |value| try requireFsrs7(value);
             try archive.groups.append(allocator, .{
                 .id = id,
                 .name = name,
-                .algorithm_major = try optionalI32Text(major_text),
+                .algorithm_major = major,
                 .parameter_set_id = try optionalIdText(try nextField(&fields)),
                 .created_at_ms = try parseI64(try nextField(&fields)),
             });
@@ -499,11 +506,13 @@ fn parseArchive(allocator: Allocator, bytes: []const u8) !Archive {
             const family = try nextField(&fields);
             const major_text = try nextField(&fields);
             if (!std.mem.eql(u8, family, "-") and !std.mem.eql(u8, family, "fsrs")) return error.UnsupportedAlgorithmFamily;
+            const major = try optionalI32Text(major_text);
+            if (major) |value| try requireFsrs7(value);
             try archive.decks.append(allocator, .{
                 .id = id,
                 .name = name,
                 .group_id = group_id,
-                .algorithm_major = try optionalI32Text(major_text),
+                .algorithm_major = major,
                 .parameter_set_id = try optionalIdText(try nextField(&fields)),
                 .created_at_ms = try parseI64(try nextField(&fields)),
             });
@@ -534,6 +543,7 @@ fn parseArchive(allocator: Allocator, bytes: []const u8) !Archive {
             const reviewed_at_ms = try parseI64(try nextField(&fields));
             if (!std.mem.eql(u8, try nextField(&fields), "fsrs")) return error.UnsupportedAlgorithmFamily;
             const algorithm_major = try parseI32(try nextField(&fields));
+            try requireFsrs7(algorithm_major);
             const implementation_major = try parseI32(try nextField(&fields));
             const implementation_minor = try parseI32(try nextField(&fields));
             const implementation_patch = try parseI32(try nextField(&fields));
@@ -576,7 +586,7 @@ pub fn dryRun(allocator: Allocator, bytes: []const u8) !DryRunReport {
 }
 
 fn destinationIsEmpty(mongo: *storage.MongoStore) !bool {
-    inline for (.{ "parameter_sets", "deck_groups", "decks", "cards", "reviews" }) |name| {
+    inline for (.{ "parameter_sets", "deck_groups", "decks", "cards", "reviews", "metadata", "counters" }) |name| {
         var cursor = try mongo.client.find(mongo.client.databaseName(), name, .{}, .{ .limit = @as(i64, 1) });
         defer cursor.deinit();
         if (try cursor.next() != null) return false;
