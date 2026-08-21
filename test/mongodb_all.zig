@@ -6,4 +6,5 @@ test {
     _ = @import("mongodb_parameter_sets.zig");
     _ = @import("mongodb_durable_history.zig");
     _ = @import("mongodb_parameter_scopes.zig");
+    _ = @import("mongodb_interchange.zig");
 }
