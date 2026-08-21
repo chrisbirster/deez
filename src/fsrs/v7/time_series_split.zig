@@ -15,7 +15,7 @@ pub const Fold = struct {
 pub const FoldMetrics = struct {
     fold: Fold,
     train: evaluator.Metrics,
-    test: evaluator.Metrics,
+    evaluation: evaluator.Metrics,
 };
 
 pub const Result = struct {
@@ -43,7 +43,7 @@ fn scoreableTimestamps(
         if (history.len < 2) continue;
         for (history[1..]) |entry| try timestamps.append(allocator, entry.reviewed_at_ms);
     }
-    std.mem.sort(time.TimestampMs, timestamps.items, {}, lessThan);
+    std.sort.heap(time.TimestampMs, timestamps.items, {}, lessThan);
     return timestamps.toOwnedSlice(allocator);
 }
 
@@ -105,7 +105,7 @@ pub fn evaluate(
             .evaluation_start_ms = options.evaluation_start_ms,
             .evaluation_end_ms_exclusive = fold.train_end_ms_exclusive,
         };
-        const test_options: evaluator.Options = .{
+        const evaluation_options: evaluator.Options = .{
             .recency_half_life_days = options.recency_half_life_days,
             .evaluation_start_ms = @max(options.evaluation_start_ms orelse fold.test_start_ms, fold.test_start_ms),
             .evaluation_end_ms_exclusive = if (options.evaluation_end_ms_exclusive) |configured|
@@ -114,8 +114,8 @@ pub fn evaluate(
                 fold.test_end_ms_exclusive,
         };
         const train_metrics = try evaluator.evaluate(histories, parameters, train_options);
-        const test_metrics = try evaluator.evaluate(histories, parameters, test_options);
-        metrics[index] = .{ .fold = fold, .train = train_metrics, .test = test_metrics };
+        const test_metrics = try evaluator.evaluate(histories, parameters, evaluation_options);
+        metrics[index] = .{ .fold = fold, .train = train_metrics, .evaluation = test_metrics };
         test_examples += test_metrics.examples;
         weighted_log_loss += test_metrics.log_loss * test_metrics.effective_weight;
         weighted_squared_error += test_metrics.brier_score * test_metrics.effective_weight;
