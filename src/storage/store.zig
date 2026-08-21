@@ -57,7 +57,20 @@ pub const Store = union(enum) {
         }
     }
 
+    fn ensureCardHasNoReviewHistory(self: *Store, id: card_mod.CardId) !void {
+        const history = try self.loadHistory(std.heap.page_allocator, id);
+        defer std.heap.page_allocator.free(history);
+        if (history.len != 0) return error.ReviewHistoryExists;
+    }
+
     pub fn deleteDeck(self: *Store, id: card_mod.DeckId) !void {
+        const deck_cards = try self.cards(std.heap.page_allocator, id);
+        defer {
+            for (deck_cards) |card| card.deinit(std.heap.page_allocator);
+            std.heap.page_allocator.free(deck_cards);
+        }
+        for (deck_cards) |card| try self.ensureCardHasNoReviewHistory(card.id);
+
         switch (self.*) {
             .sqlite => |db| try db.deleteDeck(id),
             .mongodb => |*store| try store.deleteDeck(id),
@@ -112,6 +125,7 @@ pub const Store = union(enum) {
     }
 
     pub fn deleteCard(self: *Store, id: card_mod.CardId) !void {
+        try self.ensureCardHasNoReviewHistory(id);
         switch (self.*) {
             .sqlite => |db| try db.deleteCard(id),
             .mongodb => |*store| try store.deleteCard(id),
