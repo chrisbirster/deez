@@ -48,6 +48,7 @@ pub fn build(b: *std.Build) void {
             },
         }),
     });
+    b.installArtifact(benchmark_exe);
     const benchmark_run = b.addRunArtifact(benchmark_exe);
     const benchmark_step = b.step(
         "benchmark",
