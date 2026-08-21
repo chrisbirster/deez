@@ -22,6 +22,19 @@ fn isBackupUsageError(err: anyerror) bool {
     };
 }
 
+fn printHelp(init: std.process.Init, topic: deez.cli.HelpTopic) !void {
+    var stdout_buffer: [8192]u8 = undefined;
+    var stdout_file_writer: Io.File.Writer = .init(.stdout(), init.io, &stdout_buffer);
+    const out = &stdout_file_writer.interface;
+    defer out.flush() catch {};
+
+    if (topic == .general) {
+        try out.print("{s}\n{s}", .{ deez.cli.help_text, deez.backup_cli.help_text });
+    } else {
+        try out.writeAll(deez.cli.helpText(topic));
+    }
+}
+
 pub fn main(init: std.process.Init) !void {
     const arena = init.arena.allocator();
     const raw_args = try init.minimal.args.toSlice(arena);
@@ -48,6 +61,14 @@ pub fn main(init: std.process.Init) !void {
             printErrorAndExit(init, err, deez.cli.help_text);
         printErrorAndExit(init, err, writer.buffered());
     };
+
+    switch (command) {
+        .help => |topic| {
+            try printHelp(init, topic);
+            return;
+        },
+        else => {},
+    }
 
     try deez.app.run(init, command);
 }
