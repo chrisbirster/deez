@@ -6,46 +6,87 @@ Deez is a terminal-first spaced-repetition system written in Zig. It uses FSRS f
 
 ## Status
 
-- Zig: **0.16.0**
+- Zig: **0.16.0** for development/builds
 - Scheduler: **FSRS-7**
 - MongoDB driver: **Bongo v0.4.0**, pinned to commit `8184b6266bab78fd3eb7fd8d2318f79f90e51937`
-- Primary persistence path for production validation: **MongoDB**
+- Storage: **SQLite** or **MongoDB**
 - FSRS-8: not implemented until a published specification/reference implementation exists
 
-## Build
+## Install on macOS
+
+Tagged releases publish prebuilt Apple Silicon and Intel macOS binaries. End users do **not** need Zig installed.
+
+Deez uses this repository as a Homebrew tap, so add it with the explicit repository URL and install the formula:
 
 ```bash
-zig build
-zig build test
+brew tap chrisbirster/deez https://github.com/chrisbirster/deez
+brew install chrisbirster/deez/deez
 ```
 
-The binary is written to:
+Afterward:
+
+```bash
+deez --help
+```
+
+To upgrade later:
+
+```bash
+brew update
+brew upgrade deez
+```
+
+## First-run storage setup
+
+The first command that needs persistent storage asks which backend to use:
 
 ```text
-./zig-out/bin/deez
+Deez storage [sqlite/mongodb] (sqlite):
 ```
 
-## MongoDB setup
+Press **Enter** for the default. Deez creates:
 
-Deez selects MongoDB with `DEEZ_STORAGE=mongodb` and requires a MongoDB URI in `DEEZ_MONGO_URI`.
+```text
+~/.local/share/deez/deez.db
+```
+
+The selection is saved under:
+
+```text
+~/.config/deez/config
+```
+
+Choose `mongodb` to configure a MongoDB URI instead. Run this at any time to change the saved backend:
 
 ```bash
+deez setup
+```
+
+Environment variables remain available for automation and temporary overrides:
+
+```bash
+# SQLite override
+export DEEZ_STORAGE=sqlite
+export DEEZ_DB="$HOME/.local/share/deez/deez.db"
+
+# MongoDB override
 export DEEZ_STORAGE=mongodb
 export DEEZ_MONGO_URI='mongodb://localhost:27017/deez'
-
-./zig-out/bin/deez decks
 ```
 
-For review writes, a replica set is preferred because Bongo can use MongoDB transactions to append the immutable review and update derived scheduler state atomically. On standalone MongoDB, Deez writes the review first and treats scheduler state as rebuildable cache.
+For MongoDB review writes, a replica set is preferred because Bongo can use transactions to append the immutable review and update derived scheduler state atomically. On standalone MongoDB, Deez writes the review first and treats scheduler state as rebuildable cache.
 
-## First deck
+## How decks are organized
+
+A **deck** is the top-level study container. Each card belongs to exactly one deck. Deez stores the deck and cards in whichever backend you selected; the user-facing commands are the same for SQLite and MongoDB.
 
 ```bash
-./zig-out/bin/deez deck add zig
-./zig-out/bin/deez card add 1 'What is BSON?' 'Binary JSON'
-./zig-out/bin/deez card add 1 'What is Zig?' 'A systems programming language'
-./zig-out/bin/deez cards 1
-./zig-out/bin/deez study 1
+deez deck add zig
+deez card add 1 'What is BSON?' 'Binary JSON'
+deez card add 1 'What is Zig?' 'A systems programming language'
+deez decks
+deez cards 1
+deez study 1
 ```
 
 Study ratings are:
@@ -57,23 +98,65 @@ Study ratings are:
 4 Easy
 ```
 
-Session policy can be configured without changing the persisted review history:
+Session policy can be configured without changing persisted review history:
 
 ```bash
-./zig-out/bin/deez study 1 --new-limit 10
-./zig-out/bin/deez study 1 --order reviews-first
-./zig-out/bin/deez study 1 --order new-first
-./zig-out/bin/deez study 1 --shuffle
+deez study 1 --new-limit 10
+deez study 1 --order reviews-first
+deez study 1 --order new-first
+deez study 1 --shuffle
 ```
+
+## Downloadable JSON decks
+
+A shareable Deez deck is one JSON file containing the deck name and cards:
+
+```json
+{
+  "format": "deez.deck",
+  "version": 1,
+  "deck": {
+    "name": "Zig Basics",
+    "cards": [
+      {
+        "question": "What is Zig?",
+        "answer": "A systems programming language"
+      },
+      {
+        "question": "What is comptime?",
+        "answer": "Compile-time execution"
+      }
+    ]
+  }
+}
+```
+
+Export any deck to a normal `.json` file:
+
+```bash
+deez deck export 1 > zig-basics.json
+```
+
+Download or copy that file to another machine and import it:
+
+```bash
+deez deck import zig-basics.json
+```
+
+Import always creates a new deck in the currently configured database, whether that database is SQLite or MongoDB.
+
+JSON deck files are intentionally **content-only**. They do not contain the previous user's review history, due dates, stability, difficulty, or other personal FSRS state. A downloaded deck therefore starts fresh for the person importing it.
+
+Use Deez backup/restore—not deck JSON—when you need a full-fidelity copy of your own study data and scheduler history.
 
 ## Inspect and stats
 
 ```bash
-./zig-out/bin/deez stats
-./zig-out/bin/deez stats --json
-./zig-out/bin/deez inspect 1
-./zig-out/bin/deez inspect 1 --json
-./zig-out/bin/deez scheduler list
+deez stats
+deez stats --json
+deez inspect 1
+deez inspect 1 --json
+deez scheduler list
 ```
 
 ## FSRS-7
@@ -89,10 +172,10 @@ x = linspace(0, 1, N)
 weight = 0.25 + 0.75 * x^3
 ```
 
-The newest training examples therefore receive more weight, while the oldest receive 0.25. Enable this explicitly with:
+Enable it explicitly with:
 
 ```bash
-./zig-out/bin/deez fsrs optimize --recency
+deez fsrs optimize --recency
 ```
 
 See `docs/optimizer.md`.
@@ -109,7 +192,7 @@ MongoDB collections include decks, cards, reviews, parameter sets, scheduler def
 
 ## Backup and restore
 
-The MongoDB Deez archive is a logical application-level backup. It preserves:
+The Deez logical archive preserves full personal study state, including:
 
 - deck/card IDs and content
 - immutable review timestamps/order/ratings
@@ -118,15 +201,28 @@ The MongoDB Deez archive is a logical application-level backup. It preserves:
 - scheduler defaults and deck/group pins
 - ID counters
 
-Restore validates the archive before mutation, requires an empty Mongo destination, writes source-of-truth records transactionally when transactions are available, and rebuilds derived scheduler state afterward.
+This is deliberately different from a downloadable JSON deck. JSON is for sharing deck content; backup/restore is for preserving a user's database and review history.
 
 See `docs/interchange.md` and `docs/mongodb.md`.
 
 ## Anki migration
 
-Anki collection files are SQLite databases, so SQLite is used only to read the Anki source file. The destination importer writes through Deez's `storage.Store`, which allows imported decks and review history to go directly into MongoDB/Bongo. FSRS state is reconstructed from the imported review sequence instead of copying incompatible Anki scheduler state.
+Anki collection files are SQLite databases, so SQLite is used to read the Anki source file. The destination importer writes through Deez's `storage.Store`, allowing imported data to target the configured persistence implementation while FSRS state is reconstructed from review history rather than copied blindly.
 
-## Development validation
+## Development
+
+Zig is required only when developing or building Deez from source:
+
+```bash
+zig build
+zig build test
+```
+
+The binary is written to:
+
+```text
+./zig-out/bin/deez
+```
 
 Normal validation:
 
@@ -142,15 +238,13 @@ MongoDB/Bongo acceptance:
 zig build mongo-integration-test
 ```
 
-The GitHub Mongo workflow starts replica-set, standalone, and TLS fixtures and tests against the exact pinned Bongo v0.4.0 package.
-
-Long fuzz campaigns can be run separately from the deterministic CI tier:
+Long fuzz campaigns:
 
 ```bash
 zig build test --fuzz
 ```
 
-Performance baselines can be recorded with:
+Performance baselines:
 
 ```bash
 zig build benchmark -Doptimize=ReleaseFast
@@ -163,14 +257,14 @@ Set `DEEZ_MONGO_BENCH_URI` to include the Mongo due-queue workload. See `docs/be
 - `docs/cli.md` — CLI reference
 - `docs/fsrs-7-parity.md` — FSRS-7 reference/parity policy
 - `docs/optimizer.md` — optimization and evaluation methodology
-- `docs/interchange.md` — interchange format and migration safety
+- `docs/interchange.md` — full-fidelity interchange format and migration safety
 - `docs/mongodb.md` — MongoDB/Bongo persistence and recovery
 - `docs/bongo-0.4-integration.md` — pinned Bongo 0.4.0 consumer boundary
 - `docs/benchmarks.md` — benchmark workloads and regression policy
 - `docs/fsrs-8-checklist.md` — requirements for a future published FSRS-8
-- `docs/release-checklist.md` — first-release gate
+- `docs/release-checklist.md` — release gate
 - `CONTRIBUTING.md` — contributor architecture and testing rules
 
 ## License
 
-See the repository license file if present. No license terms are implied by this README.
+MIT. See `LICENSE`.
