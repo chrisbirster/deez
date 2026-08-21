@@ -263,8 +263,8 @@ pub const Store = struct {
         scheduled_at_ms: time.TimestampMs,
     ) !u64 {
         const review_id = try self.nextId("review");
-        const review = reviewDocument(review_id, card_id, rating, reviewed_at_ms, state.stamp, scheduled_at_ms);
-        const scheduler = schedulerDocument(state);
+        const review = reviewDocument(review_id, card_id, rating, reviewed_at_ms, &state.stamp, scheduled_at_ms);
+        const scheduler = schedulerDocument(&state);
 
         if (self.client.supports_transactions) {
             var transaction = try self.client.beginTransaction(.{});
@@ -304,7 +304,7 @@ pub const Store = struct {
     }
 
     pub fn upsertSchedulerState(self: *Store, state: catalog_mod.SchedulerState) !void {
-        const scheduler = schedulerDocument(state);
+        const scheduler = schedulerDocument(&state);
         var result = try self.client.updateOne(
             self.database(),
             "cards",
@@ -785,14 +785,13 @@ const SchedulerDocument = struct {
     last_reviewed_at_ms: ?i64,
 };
 
-fn schedulerDocument(state: catalog_mod.SchedulerState) SchedulerDocument {
-    var stable = state.stamp.parameter_set_id;
+fn schedulerDocument(state: *const catalog_mod.SchedulerState) SchedulerDocument {
     return .{
         .algorithm_major = @intCast(state.stamp.algorithm.major),
         .implementation_major = @intCast(state.stamp.implementation.major),
         .implementation_minor = @intCast(state.stamp.implementation.minor),
         .implementation_patch = @intCast(state.stamp.implementation.patch),
-        .parameter_set_id = parameterBinary(&stable),
+        .parameter_set_id = parameterBinary(&state.stamp.parameter_set_id),
         .stability_days = state.stability_days,
         .difficulty = state.difficulty,
         .due_at_ms = state.due_at_ms,
@@ -805,7 +804,7 @@ fn reviewDocument(
     card_id: card_mod.CardId,
     rating: fsrs.Rating,
     reviewed_at_ms: i64,
-    stamp: fsrs.SchedulerStamp,
+    stamp: *const fsrs.SchedulerStamp,
     scheduled_at_ms: i64,
 ) struct {
     _id: i64,
@@ -819,7 +818,6 @@ fn reviewDocument(
     parameter_set_id: bongo.bson.Binary,
     scheduled_at_ms: i64,
 } {
-    var stable = stamp.parameter_set_id;
     return .{
         ._id = review_id,
         .card_id = @intCast(card_id),
@@ -829,7 +827,7 @@ fn reviewDocument(
         .implementation_major = @intCast(stamp.implementation.major),
         .implementation_minor = @intCast(stamp.implementation.minor),
         .implementation_patch = @intCast(stamp.implementation.patch),
-        .parameter_set_id = parameterBinary(&stable),
+        .parameter_set_id = parameterBinary(&stamp.parameter_set_id),
         .scheduled_at_ms = scheduled_at_ms,
     };
 }
