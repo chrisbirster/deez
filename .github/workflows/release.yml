@@ -9,37 +9,57 @@ permissions:
   contents: write
 
 jobs:
-  macos-binaries:
-    runs-on: macos-15
+  build-macos:
+    strategy:
+      matrix:
+        include:
+          - runner: macos-15
+            archive: deez-aarch64-apple-darwin.tar.gz
+          - runner: macos-15-intel
+            archive: deez-x86_64-apple-darwin.tar.gz
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
       - uses: mlugg/setup-zig@v2
         with:
           version: 0.16.0
-
-      - name: Build Apple Silicon binary
+      - name: Build native release binary
+        run: zig build -Doptimize=ReleaseFast
+      - name: Smoke test binary
+        run: ./zig-out/bin/deez --help >/dev/null
+      - name: Package binary
+        shell: bash
+        env:
+          ARCHIVE: ${{ matrix.archive }}
         run: |
-          rm -rf zig-out
-          zig build -Doptimize=ReleaseFast -Dtarget=aarch64-macos
-          mkdir -p dist/deez-aarch64-apple-darwin
-          cp zig-out/bin/deez dist/deez-aarch64-apple-darwin/deez
-          dist/deez-aarch64-apple-darwin/deez --help >/dev/null
-          tar -C dist/deez-aarch64-apple-darwin -czf dist/deez-aarch64-apple-darwin.tar.gz deez
+          mkdir -p dist/package
+          cp zig-out/bin/deez dist/package/deez
+          tar -C dist/package -czf "dist/${ARCHIVE}" deez
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.archive }}
+          path: dist/${{ matrix.archive }}
+          if-no-files-found: error
 
-      - name: Build Intel binary
-        run: |
-          rm -rf zig-out
-          zig build -Doptimize=ReleaseFast -Dtarget=x86_64-macos
-          mkdir -p dist/deez-x86_64-apple-darwin
-          cp zig-out/bin/deez dist/deez-x86_64-apple-darwin/deez
-          tar -C dist/deez-x86_64-apple-darwin -czf dist/deez-x86_64-apple-darwin.tar.gz deez
+  publish:
+    needs: build-macos
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: deez-*-apple-darwin.tar.gz
+          path: dist
+          merge-multiple: true
 
       - name: Checksums
         id: checksums
         shell: bash
         run: |
-          ARM_SHA=$(shasum -a 256 dist/deez-aarch64-apple-darwin.tar.gz | awk '{print $1}')
-          INTEL_SHA=$(shasum -a 256 dist/deez-x86_64-apple-darwin.tar.gz | awk '{print $1}')
+          ARM_SHA=$(sha256sum dist/deez-aarch64-apple-darwin.tar.gz | awk '{print $1}')
+          INTEL_SHA=$(sha256sum dist/deez-x86_64-apple-darwin.tar.gz | awk '{print $1}')
           echo "arm_sha=${ARM_SHA}" >> "$GITHUB_OUTPUT"
           echo "intel_sha=${INTEL_SHA}" >> "$GITHUB_OUTPUT"
           printf '%s  %s\n' "$ARM_SHA" deez-aarch64-apple-darwin.tar.gz > dist/SHA256SUMS
@@ -63,8 +83,8 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           VERSION="${TAG#v}"
-          git fetch origin main
-          git checkout main
+          git fetch origin main:refs/remotes/origin/main
+          git checkout -B main origin/main
           mkdir -p Formula
           cat > Formula/deez.rb <<EOF
           class Deez < Formula
