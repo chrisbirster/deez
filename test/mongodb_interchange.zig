@@ -25,12 +25,12 @@ fn clearCollection(mongo: *deez.storage.MongoStore, name: []const u8) !void {
         const owned_id = switch (id) {
             .int32 => |value| @as(i64, value),
             .int64 => |value| value,
-            .string => |_| {
+            .string => {
                 cursor.deinit();
                 _ = try mongo.client.deleteOne(mongo.client.databaseName(), name, .{});
                 continue;
             },
-            .binary => |_| {
+            .binary => {
                 cursor.deinit();
                 var all = try mongo.client.find(mongo.client.databaseName(), name, .{}, .{});
                 defer all.deinit();
