@@ -1,6 +1,6 @@
 # MongoDB and Bongo
 
-MongoDB is Deez's primary production validation backend. Deez talks to MongoDB through the frozen Bongo v0.3.0 package; application code does not depend on Bongo internals.
+MongoDB is Deez's primary production validation backend. Deez talks to MongoDB through the pinned Bongo v0.4.0 package at commit `8184b6266bab78fd3eb7fd8d2318f79f90e51937`; application code does not depend on Bongo internals.
 
 ## Configuration
 
@@ -62,7 +62,7 @@ If a card's derived state is missing or suspected stale, Deez recovery:
 
 ## Integration testing
 
-The Mongo workflow uses the exact pinned Bongo v0.3.0 source and starts:
+The Mongo workflow uses the exact pinned Bongo v0.4.0 source and starts:
 
 - a MongoDB replica set for transactions;
 - a standalone MongoDB fixture for review-first fallback;
@@ -75,3 +75,5 @@ zig build mongo-integration-test
 ```
 
 The suite covers CRUD, reconnect persistence, due queues, sessions, scheduler pinning, immutable parameter sets, parameter scopes, archive restore, and recovery.
+
+See `docs/bongo-0.4-integration.md` for the pinned consumer boundary.
