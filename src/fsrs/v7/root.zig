@@ -22,5 +22,6 @@ test {
     std.testing.refAllDecls(@This());
     _ = @import("parity_tests.zig");
     _ = @import("scheduler_parity_tests.zig");
+    _ = @import("optimizer_reference_tests.zig");
     _ = @import("property_tests.zig");
 }
