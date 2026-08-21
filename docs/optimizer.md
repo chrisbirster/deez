@@ -22,11 +22,23 @@ Deez computes deterministic finite-difference gradients rather than depending on
 
 Standard fitting gives each scoreable review example weight 1.0.
 
+```bash
+./zig-out/bin/deez fsrs optimize
+./zig-out/bin/deez fsrs optimize <deck-id>
+```
+
 A review is scoreable when it follows an earlier review for the same card. The previous history is replayed to derive the memory state used to predict recall for that review.
 
 ## Recency-weighted fitting
 
-Recency weighting is opt-in. It follows the benchmark's chronological positional weighting rather than an exponential time half-life.
+Recency weighting is opt-in. Enable it with:
+
+```bash
+./zig-out/bin/deez fsrs optimize --recency
+./zig-out/bin/deez fsrs optimize <deck-id> --recency
+```
+
+It follows the benchmark's chronological positional weighting rather than an exponential time half-life.
 
 For `N` scoreable training examples ordered from oldest to newest:
 
