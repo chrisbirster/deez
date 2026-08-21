@@ -28,6 +28,11 @@ pub fn main(init: std.process.Init) !void {
     const args = try arena.alloc([]const u8, raw_args.len);
     for (raw_args, 0..) |arg, index| args[index] = arg;
 
+    if (deez.config.isSetupCommand(args)) {
+        try deez.config.setup(init);
+        return;
+    }
+
     if (deez.backup_cli.isCommand(args)) {
         deez.backup_cli.run(init, args) catch |err| {
             if (isBackupUsageError(err)) printErrorAndExit(init, err, deez.backup_cli.help_text);
