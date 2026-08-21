@@ -26,6 +26,8 @@ pub const Command = union(enum) {
     deck_add: struct { name: []const u8 },
     deck_rename: struct { deck_id: DeckId, name: []const u8 },
     deck_delete: struct { deck_id: DeckId },
+    deck_export: struct { deck_id: DeckId },
+    deck_import: struct { path: []const u8 },
     card_add: struct { deck_id: DeckId, question: []const u8, answer: []const u8 },
     card_edit: struct { card_id: CardId, question: []const u8, answer: []const u8 },
     card_delete: struct { card_id: CardId },
@@ -127,6 +129,14 @@ pub fn parse(args: []const []const u8) !Command {
         if (std.mem.eql(u8, args[2], "delete")) {
             if (args.len != 5 or !std.mem.eql(u8, args[4], "--yes")) return error.ConfirmationRequired;
             return .{ .deck_delete = .{ .deck_id = try parseId(args[3]) } };
+        }
+        if (std.mem.eql(u8, args[2], "export")) {
+            try expectLength(args, 4);
+            return .{ .deck_export = .{ .deck_id = try parseId(args[3]) } };
+        }
+        if (std.mem.eql(u8, args[2], "import")) {
+            try expectLength(args, 4);
+            return .{ .deck_import = .{ .path = try requireText(args[3]) } };
         }
         return error.UnknownCommand;
     }
@@ -263,12 +273,15 @@ pub const help_text =
     \\DEEZ — Drill, Evaluate, Encode, Zen
     \\
     \\Usage:
+    \\  deez setup
     \\  deez help [deck|card|study|stats|inspect|fsrs|scheduler]
     \\  deez decks
     \\  deez cards <deck-id>
     \\  deez deck add <name>
     \\  deez deck rename <deck-id> <name>
     \\  deez deck delete <deck-id> --yes
+    \\  deez deck export <deck-id> > deck.json
+    \\  deez deck import <deck.json>
     \\  deez card add <deck-id> <question> <answer>
     \\  deez card edit <card-id> <question> <answer>
     \\  deez card delete <card-id> --yes
@@ -288,6 +301,8 @@ const deck_help =
     \\  deez deck add <name>
     \\  deez deck rename <deck-id> <name>
     \\  deez deck delete <deck-id> --yes
+    \\  deez deck export <deck-id> > deck.json
+    \\  deez deck import <deck.json>
 ;
 const card_help =
     \\Card commands:
@@ -363,6 +378,16 @@ test "parse card listing and add commands" {
     try std.testing.expectEqualStrings("What is BSON?", command.card_add.question);
 }
 
+test "parse JSON deck import and export commands" {
+    const export_args = [_][]const u8{ "deez", "deck", "export", "7" };
+    const exported = try parse(&export_args);
+    try std.testing.expectEqual(@as(DeckId, 7), exported.deck_export.deck_id);
+
+    const import_args = [_][]const u8{ "deez", "deck", "import", "zig.json" };
+    const imported = try parse(&import_args);
+    try std.testing.expectEqualStrings("zig.json", imported.deck_import.path);
+}
+
 test "parse optimizer recency option" {
     const args = [_][]const u8{ "deez", "fsrs", "optimize", "5", "--recency" };
     const command = try parse(&args);
@@ -417,6 +442,8 @@ test "invalid ids and missing required arguments are rejected" {
     const cases = [_][]const []const u8{
         &.{ "deez", "deck" },
         &.{ "deez", "deck", "add" },
+        &.{ "deez", "deck", "export" },
+        &.{ "deez", "deck", "import" },
         &.{ "deez", "cards" },
         &.{ "deez", "card" },
         &.{ "deez", "card", "add", "1" },
