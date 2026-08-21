@@ -61,6 +61,50 @@ jobs:
               quit(1);
             }
           '
+      - name: Test terminal Mongo backup and restore
+        working-directory: deez
+        env:
+          DEEZ_STORAGE: mongodb
+        run: |
+          zig build
+
+          export DEEZ_MONGO_URI='mongodb://localhost:27019/deez_cli_backup?replicaSet=rs0'
+          ./zig-out/bin/deez deck add backup-smoke
+          ./zig-out/bin/deez card add 1 question answer
+          ./zig-out/bin/deez backup >/tmp/deez.backup
+
+          ./zig-out/bin/deez restore --dry-run </tmp/deez.backup | tee /tmp/deez-dry-run.txt
+          grep -q 'decks=1 cards=1 reviews=0 unsupported=0' /tmp/deez-dry-run.txt
+
+          export DEEZ_MONGO_URI='mongodb://localhost:27019/deez_cli_restore?replicaSet=rs0'
+          ./zig-out/bin/deez restore --yes </tmp/deez.backup | tee /tmp/deez-restore.txt
+          grep -q 'decks=1 cards=1 reviews=0 unsupported=0' /tmp/deez-restore.txt
+          ./zig-out/bin/deez stats --json | tee /tmp/deez-restored-stats.txt
+          grep -q '"decks":1,"cards":1,"due":1,"reviews":0' /tmp/deez-restored-stats.txt
+      - name: Mongo benchmark context
+        working-directory: deez
+        run: |
+          echo "commit=${GITHUB_SHA}"
+          echo "zig=$(zig version)"
+          echo "bongo=0.4.0"
+          echo "bongo_commit=8184b6266bab78fd3eb7fd8d2318f79f90e51937"
+          echo "mongodb=$(docker exec mongodb-rs mongosh --quiet --eval 'db.version()')"
+          uname -a
+          lscpu
+          free -h
+      - name: Mongo benchmark median baseline
+        working-directory: deez
+        env:
+          DEEZ_MONGO_BENCH_URI: mongodb://localhost:27019/deez_benchmark?replicaSet=rs0
+        run: |
+          zig build benchmark -Doptimize=ReleaseFast >/tmp/deez-mongo-bench-warmup.txt
+          for run in 1 2 3 4 5; do
+            zig build benchmark -Doptimize=ReleaseFast >"/tmp/deez-mongo-bench-${run}.txt"
+            cat "/tmp/deez-mongo-bench-${run}.txt"
+          done
+          value=$(grep '^mongo_due_queue_25x_1000_cards_ns=' /tmp/deez-mongo-bench-[1-5].txt | awk -F= '{print $2}' | sort -n | sed -n '3p')
+          test -n "$value"
+          echo "median_mongo_due_queue_25x_1000_cards_ns=${value}"
       - name: Stop MongoDB fixtures
         if: always()
         run: |

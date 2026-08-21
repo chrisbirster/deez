@@ -37,6 +37,22 @@ Parameter sets are immutable BSON documents identified by a deterministic 32-byt
 
 ## Logical backup and restore
 
+The terminal commands stream Deez's logical archive format through stdout/stdin:
+
+```bash
+# Full backup
+deez backup > deez.backup
+
+# One deck plus the scheduler metadata needed to interpret it
+deez backup 42 > deck-42.backup
+
+# Validation only; no MongoDB connection or writes
+deez restore --dry-run < deez.backup
+
+# Actual restore into a clean MongoDB destination
+deez restore --yes < deez.backup
+```
+
 `interchange_mongodb` exports Deez's logical source-of-truth records. A dry run parses and validates the complete archive without mutating MongoDB.
 
 Restore rules:
@@ -47,7 +63,8 @@ Restore rules:
 - IDs and counters are preserved;
 - scheduler cache is rebuilt after commit;
 - a failed transaction leaves the destination unchanged;
-- an existing destination is never silently merged into.
+- an existing destination is never silently merged into;
+- archive input is capped at 256 MiB per invocation.
 
 The logical format is intended for Deez backup/migration, not as a general replacement for operational MongoDB backups.
 

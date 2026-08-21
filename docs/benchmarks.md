@@ -17,7 +17,7 @@ The harness reports nanoseconds for:
 - one optimizer epoch over 79 scoreable reviews;
 - dry-running a 1,000-card interchange archive 100 times.
 
-CI runs this CPU benchmark command to ensure the benchmark workloads remain buildable and executable, but does not fail on raw nanosecond values from a shared runner.
+CI runs one warm-up plus five measured ReleaseFast runs and prints the median for each CPU workload.
 
 ## Run MongoDB/Bongo workload
 
@@ -30,11 +30,51 @@ zig build benchmark -Doptimize=ReleaseFast
 
 The Mongo workload creates 1,000 cards and measures 25 deterministic due-queue reads through the same `storage.Store` → `MongoStore` → Bongo v0.4.0 path used by Deez.
 
-Do not point the benchmark at a real Deez study database.
+The live Mongo workflow runs one warm-up plus five measured ReleaseFast runs and prints the median Mongo due-queue result. Do not point the benchmark at a real Deez study database.
 
-## Baseline record
+## v0.1.0 ReleaseFast baseline
 
-For every release baseline record:
+Recorded on August 21, 2026 from PR #67 source head `28daba0314bcec4f118b65350152c565ea1a82a4`. Each number below is the median of five measured runs after one warm-up run.
+
+### CPU workloads
+
+GitHub Actions hosted runner context:
+
+```text
+OS: Ubuntu 24.04.4 LTS, x86_64, Azure hosted runner
+CPU: 4 vCPU, AMD EPYC 7763 64-Core Processor
+Memory: 15 GiB
+Zig: 0.16.0
+Optimization: ReleaseFast
+
+schedule_100_long_history_ns=57528978
+replay_100x_1000_reviews_ns=55579659
+optimize_79_examples_1_epoch_ns=5078080
+archive_dry_run_100x_1000_cards_ns=23535981
+```
+
+### MongoDB/Bongo workload
+
+The Mongo baseline ran on a separate GitHub-hosted runner, so compare this value only with equivalent Mongo runner/server context:
+
+```text
+OS: Ubuntu 24.04.4 LTS, x86_64, Azure hosted runner
+CPU: 4 vCPU, AMD EPYC 9V74 80-Core Processor
+Memory: 15 GiB
+Zig: 0.16.0
+Optimization: ReleaseFast
+MongoDB: 8.2.12
+Bongo: 0.4.0
+Bongo commit: 8184b6266bab78fd3eb7fd8d2318f79f90e51937
+
+mongo_due_queue_25x_1000_cards_ns=91542532
+```
+
+That Mongo median is about 3.66 ms per 1,000-card due-queue read over the measured 25-query workload. Hosted-runner results are reference baselines, not universal latency guarantees.
+
+## Baseline record template
+
+For every future release baseline record:
 
 ```text
 Deez commit:
@@ -44,8 +84,8 @@ OS:
 CPU:
 Memory:
 MongoDB version:
-Bongo version: 0.4.0
-Bongo commit: 8184b6266bab78fd3eb7fd8d2318f79f90e51937
+Bongo version:
+Bongo commit:
 
 schedule_100_long_history_ns=
 replay_100x_1000_reviews_ns=

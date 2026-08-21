@@ -53,6 +53,27 @@ deez scheduler list
 
 `--json` is the stable machine-readable form for stats and card inspection.
 
+## Backup and restore
+
+MongoDB backups use the Deez logical interchange format and are pipe-friendly:
+
+```bash
+export DEEZ_STORAGE=mongodb
+export DEEZ_MONGO_URI='mongodb://localhost:27017/deez'
+
+deez backup > deez.backup
+deez backup 42 > deck-42.backup
+
+deez restore --dry-run < deez.backup
+deez restore --yes < deez.backup
+```
+
+`backup` without a deck ID exports all Deez data. Supplying a deck ID exports that deck and its cards/reviews together with the scheduler metadata required to interpret them.
+
+`restore --dry-run` validates and reports archive counts without connecting to MongoDB or mutating persistent data. Actual restore requires `--yes`, requires the MongoDB backend, and refuses a non-empty destination rather than silently merging or overwriting existing Deez data. Source-of-truth records are restored transactionally on a replica set and derived scheduler state is rebuilt from immutable review history after the transaction commits.
+
+Archive input is limited to 256 MiB per invocation so malformed or accidentally redirected unbounded input cannot consume arbitrary memory.
+
 ## FSRS
 
 ```text
@@ -84,6 +105,8 @@ deez help stats
 deez help inspect
 deez help fsrs
 deez help scheduler
+deez backup --help
+deez restore --help
 ```
 
-CLI parsing lives in `src/cli.zig`; storage and scheduling behavior live behind the application/domain APIs rather than in the parser.
+The established command parser lives in `src/cli.zig`. Backup/restore is routed through the dedicated `src/backup_cli.zig` entrypoint because archives stream through stdin/stdout rather than the normal formatted application command surface. Storage and scheduling behavior remain behind domain APIs rather than in either parser.
