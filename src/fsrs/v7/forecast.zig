@@ -21,6 +21,11 @@ pub const Forecast = struct {
     }
 };
 
+pub const Selection = struct {
+    parameters: Parameters = .{},
+    config: simulator.Config = .{},
+};
+
 fn cumulativeReviews(
     allocator: std.mem.Allocator,
     parameters: Parameters,
@@ -36,7 +41,6 @@ fn aggregate(
     allocator: std.mem.Allocator,
     daily: []const Bucket,
     width_days: usize,
-    seconds_per_review: f64,
 ) ![]Bucket {
     const count = (daily.len + width_days - 1) / width_days;
     const result = try allocator.alloc(Bucket, count);
@@ -46,21 +50,21 @@ fn aggregate(
         const start = index * width_days;
         const end = @min(start + width_days, daily.len);
         var reviews: usize = 0;
-        for (daily[start..end]) |day| reviews += day.reviews;
+        var seconds: f64 = 0;
+        for (daily[start..end]) |day| {
+            reviews += day.reviews;
+            seconds += day.estimated_study_seconds;
+        }
         bucket.* = .{
             .start_day = start,
             .end_day_exclusive = end,
             .reviews = reviews,
-            .estimated_study_seconds = @as(f64, @floatFromInt(reviews)) * seconds_per_review,
+            .estimated_study_seconds = seconds,
         };
     }
     return result;
 }
 
-/// Forecast expected workload by deriving deterministic cumulative simulations
-/// over increasing horizons. This is intentionally slower than a single
-/// simulation but keeps the daily/weekly/monthly result API independent from
-/// the simulator's internal representation.
 pub fn forecast(
     allocator: std.mem.Allocator,
     parameters: Parameters,
@@ -86,15 +90,47 @@ pub fn forecast(
         previous_total = total;
     }
 
-    const weekly = try aggregate(allocator, daily, 7, config.seconds_per_review);
+    const weekly = try aggregate(allocator, daily, 7);
     errdefer allocator.free(weekly);
-    const monthly = try aggregate(allocator, daily, 30, config.seconds_per_review);
+    const monthly = try aggregate(allocator, daily, 30);
 
-    return .{
-        .daily = daily,
-        .weekly = weekly,
-        .monthly = monthly,
+    return .{ .daily = daily, .weekly = weekly, .monthly = monthly };
+}
+
+/// Combine independent deck/population forecasts. Each selection may use its
+/// own FSRS parameter set, new-card rate, seed, and per-review timing assumption.
+pub fn forecastSelections(
+    allocator: std.mem.Allocator,
+    selections: []const Selection,
+    horizon_days: usize,
+) !Forecast {
+    if (selections.len == 0) return error.EmptySelection;
+    if (horizon_days == 0) return error.InvalidHorizon;
+
+    const daily = try allocator.alloc(Bucket, horizon_days);
+    errdefer allocator.free(daily);
+    for (daily, 0..) |*bucket, index| bucket.* = .{
+        .start_day = index,
+        .end_day_exclusive = index + 1,
+        .reviews = 0,
+        .estimated_study_seconds = 0,
     };
+
+    for (selections) |selection| {
+        var config = selection.config;
+        config.horizon_days = horizon_days;
+        const one = try forecast(allocator, selection.parameters, config);
+        defer one.deinit(allocator);
+        for (daily, one.daily) |*target, source| {
+            target.reviews += source.reviews;
+            target.estimated_study_seconds += source.estimated_study_seconds;
+        }
+    }
+
+    const weekly = try aggregate(allocator, daily, 7);
+    errdefer allocator.free(weekly);
+    const monthly = try aggregate(allocator, daily, 30);
+    return .{ .daily = daily, .weekly = weekly, .monthly = monthly };
 }
 
 test "forecast returns daily weekly and monthly buckets" {
@@ -120,4 +156,22 @@ test "forecast returns daily weekly and monthly buckets" {
 
     try std.testing.expectEqual(daily_total, weekly_total);
     try std.testing.expectEqual(daily_total, monthly_total);
+}
+
+test "aggregate forecast equals the sum of independent deck forecasts" {
+    const selections = [_]Selection{
+        .{ .config = .{ .card_count = 10, .horizon_days = 14, .new_cards_per_day = 5, .seconds_per_review = 10, .seed = 1 } },
+        .{ .config = .{ .card_count = 7, .horizon_days = 14, .new_cards_per_day = 2, .seconds_per_review = 20, .seed = 2 } },
+    };
+    const combined = try forecastSelections(std.testing.allocator, &selections, 14);
+    defer combined.deinit(std.testing.allocator);
+    const first = try forecast(std.testing.allocator, selections[0].parameters, selections[0].config);
+    defer first.deinit(std.testing.allocator);
+    const second = try forecast(std.testing.allocator, selections[1].parameters, selections[1].config);
+    defer second.deinit(std.testing.allocator);
+
+    for (combined.daily, first.daily, second.daily) |total, a, b| {
+        try std.testing.expectEqual(a.reviews + b.reviews, total.reviews);
+        try std.testing.expectApproxEqAbs(a.estimated_study_seconds + b.estimated_study_seconds, total.estimated_study_seconds, 1e-12);
+    }
 }

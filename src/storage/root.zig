@@ -8,6 +8,7 @@ pub const catalog = @import("catalog.zig");
 pub const report = @import("report.zig");
 pub const backup = @import("backup.zig");
 pub const recovery = @import("recovery.zig");
+pub const migration_commit = @import("migration_commit.zig");
 
 pub const Db = sqlite.Db;
 pub const Store = store.Store;

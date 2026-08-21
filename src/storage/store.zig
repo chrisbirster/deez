@@ -57,7 +57,20 @@ pub const Store = union(enum) {
         }
     }
 
+    fn ensureCardHasNoReviewHistory(self: *Store, id: card_mod.CardId) !void {
+        const history = try self.loadHistory(std.heap.page_allocator, id);
+        defer std.heap.page_allocator.free(history);
+        if (history.len != 0) return error.ReviewHistoryExists;
+    }
+
     pub fn deleteDeck(self: *Store, id: card_mod.DeckId) !void {
+        const deck_cards = try self.cards(std.heap.page_allocator, id);
+        defer {
+            for (deck_cards) |card| card.deinit(std.heap.page_allocator);
+            std.heap.page_allocator.free(deck_cards);
+        }
+        for (deck_cards) |card| try self.ensureCardHasNoReviewHistory(card.id);
+
         switch (self.*) {
             .sqlite => |db| try db.deleteDeck(id),
             .mongodb => |*store| try store.deleteDeck(id),
@@ -112,6 +125,7 @@ pub const Store = union(enum) {
     }
 
     pub fn deleteCard(self: *Store, id: card_mod.CardId) !void {
+        try self.ensureCardHasNoReviewHistory(id);
         switch (self.*) {
             .sqlite => |db| try db.deleteCard(id),
             .mongodb => |*store| try store.deleteCard(id),
@@ -172,7 +186,13 @@ pub const Store = union(enum) {
     ) !catalog_mod.ResolvedScheduler {
         return switch (self.*) {
             .sqlite => |db| (catalog_mod.Catalog{ .db = db }).resolveDeckScheduler(deck_id, now_ms),
-            .mongodb => |*store| store.resolveDeckScheduler(deck_id, now_ms),
+            .mongodb => |*store| blk: {
+                const deck = (try store.getDeck(store.allocator, deck_id)) orelse
+                    return error.DeckNotFound;
+                defer deck.deinit(store.allocator);
+                if (!deck.algorithm.eql(.fsrs7)) return error.UnsupportedAlgorithm;
+                break :blk try store.resolveDeckScheduler(deck_id, now_ms);
+            },
         };
     }
 
@@ -188,6 +208,7 @@ pub const Store = union(enum) {
         deck_id: card_mod.DeckId,
         parameter_set_id: fsrs.ParameterSetId,
     ) !void {
+        _ = try self.loadFsrs7Parameters(parameter_set_id);
         switch (self.*) {
             .sqlite => |db| try (catalog_mod.Catalog{ .db = db }).setDeckFsrs7(deck_id, parameter_set_id),
             .mongodb => |*store| try store.setDeckFsrs7(deck_id, parameter_set_id),
@@ -242,6 +263,7 @@ pub const Store = union(enum) {
         state: catalog_mod.SchedulerState,
         scheduled_at_ms: time.TimestampMs,
     ) !u64 {
+        if (state.card_id != card_id) return error.InvalidSchedulerState;
         return switch (self.*) {
             .sqlite => |db| blk: {
                 const catalog: catalog_mod.Catalog = .{ .db = db };
@@ -258,13 +280,18 @@ pub const Store = union(enum) {
                 try db.commit();
                 break :blk review_id;
             },
-            .mongodb => |*store| store.recordReviewAndState(
-                card_id,
-                rating,
-                reviewed_at_ms,
-                state,
-                scheduled_at_ms,
-            ),
+            .mongodb => |*store| blk: {
+                const card = (try store.getCard(store.allocator, card_id)) orelse
+                    return error.CardNotFound;
+                defer card.deinit(store.allocator);
+                break :blk try store.recordReviewAndState(
+                    card_id,
+                    rating,
+                    reviewed_at_ms,
+                    state,
+                    scheduled_at_ms,
+                );
+            },
         };
     }
 

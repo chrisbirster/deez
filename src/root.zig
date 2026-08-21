@@ -7,10 +7,14 @@ pub const review = @import("review.zig");
 pub const fsrs = @import("fsrs/root.zig");
 pub const storage = @import("storage/root.zig");
 pub const study = @import("study.zig");
+pub const recovery = @import("recovery.zig");
+pub const parameter_lifecycle = @import("parameter_lifecycle.zig");
+pub const scheduler_migration = @import("scheduler_migration.zig");
 pub const cli = @import("cli.zig");
 pub const app = @import("app.zig");
 pub const interchange = @import("interchange.zig");
 pub const interchange_import = @import("interchange_import.zig");
+pub const interchange_mongodb = @import("interchange_mongodb.zig");
 pub const import = @import("import/root.zig");
 
 pub const Card = card.Card;
@@ -27,4 +31,5 @@ test {
     _ = @import("interchange_test.zig");
     _ = @import("study_replay_tests.zig");
     _ = @import("terminal_acceptance_test.zig");
+    _ = @import("fuzz_tests.zig");
 }

@@ -37,6 +37,25 @@ pub fn build(b: *std.Build) void {
     if (b.args) |args| run_cmd.addArgs(args);
     run_step.dependOn(&run_cmd.step);
 
+    const benchmark_exe = b.addExecutable(.{
+        .name = "deez-benchmarks",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/benchmarks.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "deez", .module = mod },
+            },
+        }),
+    });
+    b.installArtifact(benchmark_exe);
+    const benchmark_run = b.addRunArtifact(benchmark_exe);
+    const benchmark_step = b.step(
+        "benchmark",
+        "Run deterministic Deez benchmarks; set DEEZ_MONGO_BENCH_URI for MongoDB",
+    );
+    benchmark_step.dependOn(&benchmark_run.step);
+
     const mod_tests = b.addTest(.{ .root_module = mod });
     const run_mod_tests = b.addRunArtifact(mod_tests);
 
@@ -49,11 +68,12 @@ pub fn build(b: *std.Build) void {
 
     const mongo_integration_tests = b.addTest(.{
         .root_module = b.createModule(.{
-            .root_source_file = b.path("test/mongodb_integration.zig"),
+            .root_source_file = b.path("test/mongodb_all.zig"),
             .target = target,
             .optimize = optimize,
             .imports = &.{
                 .{ .name = "deez", .module = mod },
+                .{ .name = "bongo", .module = bongo_dependency.module("bongo") },
             },
         }),
     });
