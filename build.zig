@@ -49,7 +49,7 @@ pub fn build(b: *std.Build) void {
 
     const mongo_integration_tests = b.addTest(.{
         .root_module = b.createModule(.{
-            .root_source_file = b.path("test/mongodb_integration.zig"),
+            .root_source_file = b.path("test/mongodb_all.zig"),
             .target = target,
             .optimize = optimize,
             .imports = &.{
