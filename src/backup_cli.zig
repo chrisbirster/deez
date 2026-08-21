@@ -1,5 +1,6 @@
 const std = @import("std");
 const Io = std.Io;
+const config = @import("config.zig");
 const storage = @import("storage/root.zig");
 const interchange = @import("interchange_mongodb.zig");
 
@@ -11,8 +12,8 @@ pub const help_text =
     \\  deez restore --dry-run < deez.backup
     \\  deez restore --yes < deez.backup
     \\
-    \\Backup and restore target the MongoDB backend. Dry-run validates an archive
-    \\without connecting to MongoDB or mutating persistent data.
+    \\Backup and restore target the configured MongoDB backend. Dry-run validates
+    \\an archive without connecting to MongoDB or mutating persistent data.
 ;
 
 const Command = union(enum) {
@@ -56,10 +57,9 @@ pub fn isCommand(args: []const []const u8) bool {
 }
 
 fn openMongoStore(init: std.process.Init) !storage.Store {
-    const backend = init.environ_map.get("DEEZ_STORAGE") orelse "sqlite";
-    if (!std.mem.eql(u8, backend, "mongodb")) return error.MongoBackendRequired;
-    const uri = init.environ_map.get("DEEZ_MONGO_URI") orelse return error.MissingMongoUri;
-    const mongo = try storage.MongoStore.connect(init.io, init.gpa, uri);
+    const selection = try config.resolve(init);
+    if (selection.backend != .mongodb) return error.MongoBackendRequired;
+    const mongo = try storage.MongoStore.connect(init.io, init.gpa, selection.mongo_uri.?);
     return .{ .mongodb = mongo };
 }
 
