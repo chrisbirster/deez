@@ -216,13 +216,13 @@ pub fn parse(args: []const []const u8) !Command {
         if (args.len < 3) return error.InvalidArguments;
         if (std.mem.eql(u8, args[2], "optimize")) {
             var deck_id: ?DeckId = null;
-            var recency_half_life_days: ?f64 = null;
+            var recency = false;
             var index: usize = 3;
             while (index < args.len) {
-                if (std.mem.eql(u8, args[index], "--recency-days")) {
-                    if (index + 1 >= args.len) return error.InvalidArguments;
-                    recency_half_life_days = try parseFloat(args[index + 1]);
-                    index += 2;
+                if (std.mem.eql(u8, args[index], "--recency")) {
+                    if (recency) return error.InvalidArguments;
+                    recency = true;
+                    index += 1;
                 } else if (deck_id == null) {
                     deck_id = try parseId(args[index]);
                     index += 1;
@@ -230,7 +230,7 @@ pub fn parse(args: []const []const u8) !Command {
             }
             return .{ .fsrs_optimize = .{
                 .deck_id = deck_id,
-                .recency_half_life_days = recency_half_life_days,
+                .recency_half_life_days = if (recency) 1.0 else null,
             } };
         }
         if (std.mem.eql(u8, args[2], "evaluate")) {
@@ -275,7 +275,7 @@ pub const help_text =
     \\  deez study <deck-id> [--new-limit <count>] [--order due|reviews-first|new-first] [--shuffle]
     \\  deez stats [deck-id] [--json]
     \\  deez inspect <card-id> [--json]
-    \\  deez fsrs optimize [deck-id] [--recency-days <days>]
+    \\  deez fsrs optimize [deck-id] [--recency]
     \\  deez fsrs evaluate [deck-id]
     \\  deez fsrs simulate [--retention <0..1>]
     \\  deez fsrs retention
@@ -306,7 +306,7 @@ const stats_help = "Usage: deez stats [deck-id] [--json]\n";
 const inspect_help = "Usage: deez inspect <card-id> [--json]\n";
 const fsrs_help =
     \\FSRS commands:
-    \\  deez fsrs optimize [deck-id] [--recency-days <days>]
+    \\  deez fsrs optimize [deck-id] [--recency]
     \\  deez fsrs evaluate [deck-id]
     \\  deez fsrs simulate [--retention <0..1>]
     \\  deez fsrs retention
@@ -364,10 +364,15 @@ test "parse card listing and add commands" {
 }
 
 test "parse optimizer recency option" {
-    const args = [_][]const u8{ "deez", "fsrs", "optimize", "5", "--recency-days", "90" };
+    const args = [_][]const u8{ "deez", "fsrs", "optimize", "5", "--recency" };
     const command = try parse(&args);
     try std.testing.expectEqual(@as(?DeckId, 5), command.fsrs_optimize.deck_id);
-    try std.testing.expectApproxEqAbs(@as(f64, 90), command.fsrs_optimize.recency_half_life_days.?, 1e-12);
+    try std.testing.expect(command.fsrs_optimize.recency_half_life_days != null);
+}
+
+test "optimizer rejects duplicate recency flag" {
+    const args = [_][]const u8{ "deez", "fsrs", "optimize", "--recency", "--recency" };
+    try std.testing.expectError(error.InvalidArguments, parse(&args));
 }
 
 test "command-specific help parses" {
