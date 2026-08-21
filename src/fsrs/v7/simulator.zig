@@ -33,6 +33,8 @@ pub const Result = struct {
     average_daily_reviews: f64 = 0,
     estimated_study_seconds: f64 = 0,
     average_retrievability_at_horizon: f64 = 0,
+    average_stability_days_at_horizon: f64 = 0,
+    average_difficulty_at_horizon: f64 = 0,
 };
 
 const SimCard = struct {
@@ -110,6 +112,10 @@ fn countRating(result: *Result, rating: Rating) void {
     }
 }
 
+/// Probabilistic FSRS simulation. Recall/failure is sampled from the FSRS
+/// retrievability probability; recalled answers are then split between
+/// Hard/Good/Easy according to RatingModel. The supplied seed makes the entire
+/// outcome sequence reproducible.
 pub fn simulate(
     allocator: std.mem.Allocator,
     parameters: Parameters,
@@ -179,18 +185,25 @@ pub fn simulate(
     if (result.reviews == config.maximum_reviews) return error.MaximumReviewsExceeded;
 
     var retrievability_sum: f64 = 0;
-    var retrievability_count: usize = 0;
+    var stability_sum: f64 = 0;
+    var difficulty_sum: f64 = 0;
+    var memory_count: usize = 0;
     for (cards) |card| {
         if (card.state) |state| {
             retrievability_sum += try model.retrievability(@max(0.0, horizon - card.last_review_day), state, parameters);
-            retrievability_count += 1;
+            stability_sum += state.stability_days;
+            difficulty_sum += state.difficulty;
+            memory_count += 1;
         }
     }
 
     result.average_daily_reviews = @as(f64, @floatFromInt(result.reviews)) / @as(f64, @floatFromInt(config.horizon_days));
     result.estimated_study_seconds = @as(f64, @floatFromInt(result.reviews)) * config.seconds_per_review;
-    if (retrievability_count > 0) {
-        result.average_retrievability_at_horizon = retrievability_sum / @as(f64, @floatFromInt(retrievability_count));
+    if (memory_count > 0) {
+        const divisor: f64 = @floatFromInt(memory_count);
+        result.average_retrievability_at_horizon = retrievability_sum / divisor;
+        result.average_stability_days_at_horizon = stability_sum / divisor;
+        result.average_difficulty_at_horizon = difficulty_sum / divisor;
     }
     return result;
 }
@@ -207,6 +220,14 @@ test "simulation is deterministic" {
     try std.testing.expectEqual(first.reviews, second.reviews);
     try std.testing.expectEqual(first.lapses, second.lapses);
     try std.testing.expectApproxEqAbs(first.average_retrievability_at_horizon, second.average_retrievability_at_horizon, 1e-12);
+    try std.testing.expectApproxEqAbs(first.average_stability_days_at_horizon, second.average_stability_days_at_horizon, 1e-12);
+    try std.testing.expectApproxEqAbs(first.average_difficulty_at_horizon, second.average_difficulty_at_horizon, 1e-12);
+}
+
+test "simulation exposes finite memory state at the horizon" {
+    const result = try simulate(std.testing.allocator, .{}, .{ .card_count = 4, .horizon_days = 10, .new_cards_per_day = 4, .seed = 99 });
+    try std.testing.expect(result.average_stability_days_at_horizon > 0);
+    try std.testing.expect(result.average_difficulty_at_horizon >= 1 and result.average_difficulty_at_horizon <= 10);
 }
 
 test "higher desired retention costs more reviews" {
