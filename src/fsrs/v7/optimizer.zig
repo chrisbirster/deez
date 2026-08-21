@@ -20,6 +20,10 @@ pub const Config = struct {
     l2_weight: f64 = 0.5,
     minimum_examples: usize = 20,
     recency_weighting: bool = false,
+    // Temporary source-compatibility bridge for the existing CLI. Any value
+    // enables the upstream positional weighting; the numeric half-life is not
+    // used by FSRS-7 training and will be removed from the CLI before release.
+    recency_half_life_days: ?f64 = null,
     seed: u64 = 0x4445455a,
 };
 
@@ -105,9 +109,9 @@ fn regularization(parameters: Parameters) f64 {
 
 fn exampleCount(histories: []const []const HistoryEntry) usize {
     var count: usize = 0;
-    for (histories) |history| if (history.len > 1) {
-        count += history.len - 1;
-    };
+    for (histories) |history| {
+        if (history.len > 1) count += history.len - 1;
+    }
     return count;
 }
 
@@ -221,8 +225,9 @@ pub fn optimize(
     if (config.learning_rate <= 0 or !std.math.isFinite(config.learning_rate)) return error.InvalidLearningRate;
     if (config.finite_difference_step <= 0 or !std.math.isFinite(config.finite_difference_step)) return error.InvalidFiniteDifferenceStep;
 
+    const use_recency = config.recency_weighting or config.recency_half_life_days != null;
     const allocator = std.heap.c_allocator;
-    const weights = try prepareWeights(allocator, histories, config.recency_weighting);
+    const weights = try prepareWeights(allocator, histories, use_recency);
     defer allocator.free(weights);
     if (weights.len < config.minimum_examples) return error.NotEnoughReviewHistory;
 
@@ -277,7 +282,7 @@ pub fn optimize(
         .objective_after = try objective(histories, parameters, weights, config),
         .examples = final_loss.examples,
         .epochs = config.epochs,
-        .recency_weighting = config.recency_weighting,
+        .recency_weighting = use_recency,
         .seed = config.seed,
     };
 }
