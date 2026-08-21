@@ -31,5 +31,22 @@ jobs:
           uname -a
           lscpu
           free -h
-      - name: Benchmark smoke
-        run: zig build benchmark -Doptimize=ReleaseFast
+      - name: Benchmark smoke and median baseline
+        run: |
+          zig build benchmark -Doptimize=ReleaseFast >/tmp/deez-bench-warmup.txt
+          for run in 1 2 3 4 5; do
+            zig build benchmark -Doptimize=ReleaseFast >"/tmp/deez-bench-${run}.txt"
+            cat "/tmp/deez-bench-${run}.txt"
+          done
+
+          median() {
+            key="$1"
+            value=$(grep "^${key}=" /tmp/deez-bench-[1-5].txt | awk -F'[= ]' '{print $2}' | sort -n | sed -n '3p')
+            test -n "$value"
+            echo "median_${key}=${value}"
+          }
+
+          median schedule_100_long_history_ns
+          median replay_100x_1000_reviews_ns
+          median optimize_79_examples_1_epoch_ns
+          median archive_dry_run_100x_1000_cards_ns
