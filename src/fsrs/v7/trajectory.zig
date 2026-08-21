@@ -9,6 +9,8 @@ pub const Point = struct {
     average_daily_reviews: f64,
     estimated_study_seconds: f64,
     average_retrievability: f64,
+    average_stability_days: f64,
+    average_difficulty: f64,
 };
 
 /// Return deterministic memory/workload progression over time without exposing
@@ -33,30 +35,26 @@ pub fn project(
         var config = base_config;
         config.horizon_days = day;
         const result = try simulator.simulate(allocator, parameters, config);
-        points[index] = .{
-            .day = day,
-            .cumulative_reviews = result.reviews,
-            .cumulative_lapses = result.lapses,
-            .average_daily_reviews = result.average_daily_reviews,
-            .estimated_study_seconds = result.estimated_study_seconds,
-            .average_retrievability = result.average_retrievability_at_horizon,
-        };
+        points[index] = pointFromResult(day, result);
         index += 1;
     }
 
-    var final_config = base_config;
-    final_config.horizon_days = base_config.horizon_days;
-    const final_result = try simulator.simulate(allocator, parameters, final_config);
-    points[index] = .{
-        .day = base_config.horizon_days,
-        .cumulative_reviews = final_result.reviews,
-        .cumulative_lapses = final_result.lapses,
-        .average_daily_reviews = final_result.average_daily_reviews,
-        .estimated_study_seconds = final_result.estimated_study_seconds,
-        .average_retrievability = final_result.average_retrievability_at_horizon,
-    };
-
+    const final_result = try simulator.simulate(allocator, parameters, base_config);
+    points[index] = pointFromResult(base_config.horizon_days, final_result);
     return points;
+}
+
+fn pointFromResult(day: usize, result: simulator.Result) Point {
+    return .{
+        .day = day,
+        .cumulative_reviews = result.reviews,
+        .cumulative_lapses = result.lapses,
+        .average_daily_reviews = result.average_daily_reviews,
+        .estimated_study_seconds = result.estimated_study_seconds,
+        .average_retrievability = result.average_retrievability_at_horizon,
+        .average_stability_days = result.average_stability_days_at_horizon,
+        .average_difficulty = result.average_difficulty_at_horizon,
+    };
 }
 
 test "trajectory returns deterministic memory and workload progression" {
@@ -75,6 +73,8 @@ test "trajectory returns deterministic memory and workload progression" {
     for (points) |point| {
         try std.testing.expect(std.math.isFinite(point.average_retrievability));
         try std.testing.expect(point.average_retrievability >= 0 and point.average_retrievability <= 1);
+        try std.testing.expect(point.average_stability_days > 0);
+        try std.testing.expect(point.average_difficulty >= 1 and point.average_difficulty <= 10);
     }
     for (points[1..], points[0 .. points.len - 1]) |current, previous| {
         try std.testing.expect(current.cumulative_reviews >= previous.cumulative_reviews);
