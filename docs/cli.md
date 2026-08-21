@@ -1,6 +1,42 @@
 # Deez CLI
 
-Deez is terminal-first. Command parsing is separate from storage/scheduler behavior so the same domain rules apply to MongoDB and other supported backends.
+Deez is terminal-first. Command parsing is separate from storage/scheduler behavior so the same domain rules apply to SQLite and MongoDB.
+
+## Storage setup
+
+The first storage-backed command prompts for a backend when no saved configuration or explicit environment override exists:
+
+```text
+Deez storage [sqlite/mongodb] (sqlite):
+```
+
+An empty response selects SQLite and creates the database at:
+
+```text
+~/.local/share/deez/deez.db
+```
+
+The selected backend is persisted in `~/.config/deez/config`. Re-run the setup prompt at any time with:
+
+```text
+deez setup
+```
+
+Environment variables override saved configuration:
+
+```bash
+export DEEZ_STORAGE=sqlite
+export DEEZ_DB="$HOME/.local/share/deez/deez.db"
+```
+
+or:
+
+```bash
+export DEEZ_STORAGE=mongodb
+export DEEZ_MONGO_URI='mongodb://localhost:27017/deez'
+```
+
+Help output does not require or initialize a database.
 
 ## Exit codes
 
@@ -13,10 +49,10 @@ Deez is terminal-first. Command parsing is separate from storage/scheduler behav
 Examples:
 
 ```sh
-./zig-out/bin/deez --help
+deez --help
 printf '%s\n' "$?"   # 0
 
-./zig-out/bin/deez wat
+deez wat
 printf '%s\n' "$?"   # 2
 ```
 
@@ -28,12 +64,45 @@ deez cards <deck-id>
 deez deck add <name>
 deez deck rename <deck-id> <name>
 deez deck delete <deck-id> --yes
+deez deck export <deck-id> > deck.json
+deez deck import <deck.json>
 deez card add <deck-id> <question> <answer>
 deez card edit <card-id> <question> <answer>
 deez card delete <card-id> --yes
 ```
 
-Destructive operations require explicit `--yes` intent.
+A deck is the top-level content container. Cards belong to exactly one deck. Destructive operations require explicit `--yes` intent.
+
+### Shareable JSON decks
+
+`deck export` writes a portable content-only JSON document:
+
+```json
+{
+  "format": "deez.deck",
+  "version": 1,
+  "deck": {
+    "name": "Zig Basics",
+    "cards": [
+      {
+        "question": "What is Zig?",
+        "answer": "A systems programming language"
+      }
+    ]
+  }
+}
+```
+
+Example round trip:
+
+```bash
+deez deck export 1 > zig-basics.json
+deez deck import zig-basics.json
+```
+
+Import creates a new deck and new cards in the currently configured backend. The same JSON file can therefore be loaded into SQLite or MongoDB without changing the file.
+
+Deck JSON intentionally excludes personal review history, scheduler state, due dates, difficulty, stability, and parameter-set identity. A downloaded deck starts fresh for its importer. Use backup/restore for full-fidelity personal data migration.
 
 ## Study
 
@@ -55,7 +124,9 @@ deez scheduler list
 
 ## Backup and restore
 
-MongoDB backups use the Deez logical interchange format and are pipe-friendly:
+The existing logical archive is separate from shareable deck JSON. It is intended to preserve a user's complete study data and scheduler metadata.
+
+MongoDB backups are pipe-friendly:
 
 ```bash
 export DEEZ_STORAGE=mongodb
@@ -85,18 +156,10 @@ deez fsrs retention
 
 `--recency` is opt-in and uses the documented current FSRS benchmark positional weighting. It is not a time half-life flag. See `docs/optimizer.md`.
 
-## MongoDB environment
-
-```bash
-export DEEZ_STORAGE=mongodb
-export DEEZ_MONGO_URI='mongodb://localhost:27017/deez'
-```
-
-When MongoDB is explicitly selected, startup/operation errors are surfaced rather than silently switching storage backends.
-
 ## Help
 
 ```text
+deez --help
 deez help
 deez help deck
 deez help card
