@@ -248,6 +248,7 @@ pub const Store = union(enum) {
         state: catalog_mod.SchedulerState,
         scheduled_at_ms: time.TimestampMs,
     ) !u64 {
+        if (state.card_id != card_id) return error.InvalidSchedulerState;
         return switch (self.*) {
             .sqlite => |db| blk: {
                 const catalog: catalog_mod.Catalog = .{ .db = db };
@@ -264,13 +265,18 @@ pub const Store = union(enum) {
                 try db.commit();
                 break :blk review_id;
             },
-            .mongodb => |*store| store.recordReviewAndState(
-                card_id,
-                rating,
-                reviewed_at_ms,
-                state,
-                scheduled_at_ms,
-            ),
+            .mongodb => |*store| blk: {
+                const card = (try store.getCard(store.allocator, card_id)) orelse
+                    return error.CardNotFound;
+                defer card.deinit(store.allocator);
+                break :blk try store.recordReviewAndState(
+                    card_id,
+                    rating,
+                    reviewed_at_ms,
+                    state,
+                    scheduled_at_ms,
+                );
+            },
         };
     }
 
