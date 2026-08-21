@@ -24,5 +24,12 @@ jobs:
         run: zig build
       - name: Test
         run: zig build test
+      - name: Benchmark context
+        run: |
+          echo "commit=${GITHUB_SHA}"
+          echo "zig=$(zig version)"
+          uname -a
+          lscpu
+          free -h
       - name: Benchmark smoke
         run: zig build benchmark -Doptimize=ReleaseFast
