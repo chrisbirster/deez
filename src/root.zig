@@ -11,6 +11,7 @@ pub const cli = @import("cli.zig");
 pub const app = @import("app.zig");
 pub const interchange = @import("interchange.zig");
 pub const interchange_import = @import("interchange_import.zig");
+pub const interchange_mongodb = @import("interchange_mongodb.zig");
 pub const import = @import("import/root.zig");
 
 pub const Card = card.Card;
