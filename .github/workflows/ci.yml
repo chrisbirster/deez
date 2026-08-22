@@ -19,7 +19,15 @@ jobs:
             sudo apt-get install -y libsqlite3-dev
           fi
       - name: Format
-        run: zig fmt --check build.zig src test
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! zig fmt --check build.zig src test; then
+            zig fmt build.zig src test
+            echo 'zig fmt produced the following diff:'
+            git --no-pager diff -- build.zig src test
+            exit 1
+          fi
       - name: Build
         run: zig build
       - name: First-run and shareable deck smoke
