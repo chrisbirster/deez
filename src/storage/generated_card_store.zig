@@ -31,7 +31,8 @@ pub fn link(
 ) !void {
     switch (store.*) {
         .sqlite => |db| {
-            const stmt = try prepare(db,
+            const stmt = try prepare(
+                db,
                 "INSERT INTO generated_cards(card_id, note_id, template_ordinal, generation_key) VALUES (?1, ?2, ?3, ?4);",
             );
             defer _ = c.sqlite3_finalize(stmt);
@@ -104,7 +105,8 @@ pub fn updateNote(
             try bindInt64(delete_stmt, 1, @intCast(note_id));
             if (c.sqlite3_step(delete_stmt) != c.SQLITE_DONE) return error.SqliteStepFailed;
             for (fields) |field| {
-                const stmt = try prepare(db,
+                const stmt = try prepare(
+                    db,
                     "INSERT INTO note_fields(note_id, ordinal, value) VALUES (?1, ?2, ?3);",
                 );
                 defer _ = c.sqlite3_finalize(stmt);
