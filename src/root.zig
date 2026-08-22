@@ -33,7 +33,7 @@ pub const ReviewId = review.ReviewId;
 pub const Db = storage.Db;
 pub const Study = study.Study;
 
- test {
+test {
     std.testing.refAllDecls(@This());
     _ = @import("interchange_test.zig");
     _ = @import("study_replay_tests.zig");
