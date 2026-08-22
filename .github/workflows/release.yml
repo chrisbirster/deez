@@ -1,0 +1,124 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos:
+    strategy:
+      matrix:
+        include:
+          - runner: macos-15
+            archive: deez-aarch64-apple-darwin.tar.gz
+          - runner: macos-15-intel
+            archive: deez-x86_64-apple-darwin.tar.gz
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+      - name: Build native release binary
+        run: zig build -Doptimize=ReleaseFast
+      - name: Smoke test binary
+        run: ./zig-out/bin/deez --help >/dev/null
+      - name: Package binary
+        shell: bash
+        env:
+          ARCHIVE: ${{ matrix.archive }}
+        run: |
+          mkdir -p dist/package
+          cp zig-out/bin/deez dist/package/deez
+          tar -C dist/package -czf "dist/${ARCHIVE}" deez
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.archive }}
+          path: dist/${{ matrix.archive }}
+          if-no-files-found: error
+
+  publish:
+    needs: build-macos
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: deez-*-apple-darwin.tar.gz
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        id: checksums
+        shell: bash
+        run: |
+          ARM_SHA=$(sha256sum dist/deez-aarch64-apple-darwin.tar.gz | awk '{print $1}')
+          INTEL_SHA=$(sha256sum dist/deez-x86_64-apple-darwin.tar.gz | awk '{print $1}')
+          echo "arm_sha=${ARM_SHA}" >> "$GITHUB_OUTPUT"
+          echo "intel_sha=${INTEL_SHA}" >> "$GITHUB_OUTPUT"
+          printf '%s  %s\n' "$ARM_SHA" deez-aarch64-apple-darwin.tar.gz > dist/SHA256SUMS
+          printf '%s  %s\n' "$INTEL_SHA" deez-x86_64-apple-darwin.tar.gz >> dist/SHA256SUMS
+          cat dist/SHA256SUMS
+
+      - name: Publish release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            dist/deez-aarch64-apple-darwin.tar.gz
+            dist/deez-x86_64-apple-darwin.tar.gz
+            dist/SHA256SUMS
+
+      - name: Update Homebrew formula on main
+        shell: bash
+        env:
+          ARM_SHA: ${{ steps.checksums.outputs.arm_sha }}
+          INTEL_SHA: ${{ steps.checksums.outputs.intel_sha }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          VERSION="${TAG#v}"
+          git fetch origin main:refs/remotes/origin/main
+          git checkout -B main origin/main
+          mkdir -p Formula
+          cat > Formula/deez.rb <<EOF
+          class Deez < Formula
+            desc "Terminal-first spaced-repetition system using FSRS"
+            homepage "https://github.com/chrisbirster/deez"
+            version "${VERSION}"
+            license "MIT"
+
+            on_arm do
+              url "https://github.com/chrisbirster/deez/releases/download/${TAG}/deez-aarch64-apple-darwin.tar.gz"
+              sha256 "${ARM_SHA}"
+            end
+
+            on_intel do
+              url "https://github.com/chrisbirster/deez/releases/download/${TAG}/deez-x86_64-apple-darwin.tar.gz"
+              sha256 "${INTEL_SHA}"
+            end
+
+            depends_on :macos
+
+            def install
+              bin.install "deez"
+            end
+
+            test do
+              assert_match "DEEZ", shell_output("#{bin}/deez --help")
+            end
+          end
+          EOF
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/deez.rb
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m "Update Homebrew formula for ${TAG}"
+          git push origin main
