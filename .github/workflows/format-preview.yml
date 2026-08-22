@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feature/rc1-content-model
+  pull_request:
 
 jobs:
   preview:
