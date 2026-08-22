@@ -1,11 +1,13 @@
 const std = @import("std");
 const DeckId = @import("card.zig").DeckId;
 const CardId = @import("card.zig").CardId;
+const NoteId = @import("content.zig").NoteId;
 
 pub const HelpTopic = enum {
     general,
     deck,
     nut,
+    note,
     card,
     study,
     stats,
@@ -31,6 +33,16 @@ pub const Command = union(enum) {
     deck_import: struct { path: []const u8 },
     nut_export: struct { deck_id: DeckId },
     nut_import: struct { path: []const u8 },
+    note_add: struct {
+        deck_id: DeckId,
+        note_type: []const u8,
+        fields: []const []const u8,
+    },
+    note_edit: struct {
+        deck_id: DeckId,
+        note_id: NoteId,
+        fields: []const []const u8,
+    },
     card_add: struct { deck_id: DeckId, question: []const u8, answer: []const u8 },
     card_edit: struct { card_id: CardId, question: []const u8, answer: []const u8 },
     card_delete: struct { card_id: CardId },
@@ -80,6 +92,7 @@ fn requireText(text: []const u8) ![]const u8 {
 fn parseHelpTopic(text: []const u8) !HelpTopic {
     if (std.mem.eql(u8, text, "deck") or std.mem.eql(u8, text, "decks")) return .deck;
     if (std.mem.eql(u8, text, "nut") or std.mem.eql(u8, text, "nuts")) return .nut;
+    if (std.mem.eql(u8, text, "note") or std.mem.eql(u8, text, "notes")) return .note;
     if (std.mem.eql(u8, text, "card") or std.mem.eql(u8, text, "cards")) return .card;
     if (std.mem.eql(u8, text, "study")) return .study;
     if (std.mem.eql(u8, text, "stats")) return .stats;
@@ -159,6 +172,27 @@ pub fn parse(args: []const []const u8) !Command {
         if (std.mem.eql(u8, args[2], "import")) {
             try expectLength(args, 4);
             return .{ .deck_import = .{ .path = try requireText(args[3]) } };
+        }
+        return error.UnknownCommand;
+    }
+    if (std.mem.eql(u8, command, "note")) {
+        if (args.len == 3 and isHelp(args[2])) return .{ .help = .note };
+        if (args.len < 3) return error.InvalidArguments;
+        if (std.mem.eql(u8, args[2], "add")) {
+            if (args.len < 7) return error.InvalidArguments;
+            return .{ .note_add = .{
+                .deck_id = try parseId(args[3]),
+                .note_type = try requireText(args[4]),
+                .fields = args[5..],
+            } };
+        }
+        if (std.mem.eql(u8, args[2], "edit")) {
+            if (args.len < 7) return error.InvalidArguments;
+            return .{ .note_edit = .{
+                .deck_id = try parseId(args[3]),
+                .note_id = try parseId(args[4]),
+                .fields = args[5..],
+            } };
         }
         return error.UnknownCommand;
     }
@@ -296,7 +330,7 @@ pub const help_text =
     \\
     \\Usage:
     \\  deez setup
-    \\  deez help [deck|nut|card|study|stats|inspect|fsrs|scheduler]
+    \\  deez help [deck|nut|note|card|study|stats|inspect|fsrs|scheduler]
     \\  deez decks
     \\  deez nuts
     \\  deez nut export <deck-id> > deck.nut
@@ -307,6 +341,8 @@ pub const help_text =
     \\  deez deck delete <deck-id> --yes
     \\  deez deck export <deck-id> > deck.json
     \\  deez deck import <deck.json|deck.nut>
+    \\  deez note add <deck-id> <basic|reverse|optional-reverse|cloze|type-answer> <fields...>
+    \\  deez note edit <deck-id> <note-id> <fields...>
     \\  deez card add <deck-id> <question> <answer>
     \\  deez card edit <card-id> <question> <answer>
     \\  deez card delete <card-id> --yes
@@ -338,6 +374,15 @@ const nut_help =
     \\`deez nuts` lists the same stored decks as `deez decks`.
     \\.nut files are line-oriented JSON deck files for sharing deck content.
 ;
+const note_help =
+    \\Note commands:
+    \\  deez note add <deck-id> basic <front> <back>
+    \\  deez note add <deck-id> reverse <front> <back>
+    \\  deez note add <deck-id> optional-reverse <front> <back> <add-reverse>
+    \\  deez note add <deck-id> cloze <text> <extra>
+    \\  deez note add <deck-id> type-answer <front> <back>
+    \\  deez note edit <deck-id> <note-id> <fields...>
+;
 const card_help =
     \\Card commands:
     \\  deez cards <deck-id>
@@ -367,6 +412,7 @@ pub fn helpText(topic: HelpTopic) []const u8 {
         .general => help_text,
         .deck => deck_help,
         .nut => nut_help,
+        .note => note_help,
         .card => card_help,
         .study => study_help,
         .stats => stats_help,
@@ -386,16 +432,7 @@ test "parse study command" {
 }
 
 test "parse study queue options" {
-    const args = [_][]const u8{
-        "deez",
-        "study",
-        "42",
-        "--new-limit",
-        "10",
-        "--order",
-        "reviews-first",
-        "--shuffle",
-    };
+    const args = [_][]const u8{ "deez", "study", "42", "--new-limit", "10", "--order", "reviews-first", "--shuffle" };
     const command = try parse(&args);
     try std.testing.expectEqual(@as(?usize, 10), command.study.new_limit);
     try std.testing.expectEqual(StudyOrder.reviews_first, command.study.order);
@@ -411,6 +448,18 @@ test "parse card listing and add commands" {
     const command = try parse(&add_args);
     try std.testing.expectEqual(@as(DeckId, 3), command.card_add.deck_id);
     try std.testing.expectEqualStrings("What is BSON?", command.card_add.question);
+}
+
+test "parse note commands" {
+    const add_args = [_][]const u8{ "deez", "note", "add", "3", "reverse", "France", "Paris" };
+    const add = try parse(&add_args);
+    try std.testing.expectEqual(@as(DeckId, 3), add.note_add.deck_id);
+    try std.testing.expectEqualStrings("reverse", add.note_add.note_type);
+    try std.testing.expectEqual(@as(usize, 2), add.note_add.fields.len);
+
+    const edit_args = [_][]const u8{ "deez", "note", "edit", "3", "9", "France", "Paris" };
+    const edit = try parse(&edit_args);
+    try std.testing.expectEqual(@as(NoteId, 9), edit.note_edit.note_id);
 }
 
 test "deez nuts aliases deck listing" {
@@ -502,6 +551,9 @@ test "invalid ids and missing required arguments are rejected" {
         &.{ "deez", "nut" },
         &.{ "deez", "nut", "export" },
         &.{ "deez", "nut", "import" },
+        &.{ "deez", "note" },
+        &.{ "deez", "note", "add", "1" },
+        &.{ "deez", "note", "edit", "1" },
         &.{ "deez", "cards" },
         &.{ "deez", "card" },
         &.{ "deez", "card", "add", "1" },
