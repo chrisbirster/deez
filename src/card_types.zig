@@ -42,7 +42,17 @@ fn builtinForId(id: content.NoteTypeId) !content.BuiltInNoteType {
 fn requireFields(kind: content.BuiltInNoteType, values: []const []const u8) !void {
     const expected = kind.definition().fields.len;
     if (values.len != expected) return error.InvalidFieldCount;
-    for (values) |value| try content.requireText(value);
+    switch (kind) {
+        .cloze => try content.requireText(values[0]),
+        .optional_reverse => {
+            try content.requireText(values[0]);
+            try content.requireText(values[1]);
+        },
+        .basic, .basic_reverse, .type_answer => {
+            try content.requireText(values[0]);
+            try content.requireText(values[1]);
+        },
+    }
 }
 
 fn simpleDraft(
@@ -96,10 +106,12 @@ fn collectClozeOrdinals(allocator: std.mem.Allocator, source: []const u8) ![]u32
     while (index < source.len) {
         if (try parseClozeAt(source, index)) |cloze| {
             var exists = false;
-            for (ordinals.items) |value| if (value == cloze.ordinal) {
-                exists = true;
-                break;
-            };
+            for (ordinals.items) |value| {
+                if (value == cloze.ordinal) {
+                    exists = true;
+                    break;
+                }
+            }
             if (!exists) try ordinals.append(allocator, cloze.ordinal);
             index = cloze.end;
         } else index += 1;
@@ -290,8 +302,18 @@ test "reverse note generates stable forward and reverse cards" {
     try std.testing.expectEqualSlices(u64, created.card_ids, ids);
 }
 
+test "optional reverse allows a blank toggle" {
+    const values = [_][]const u8{ "France", "Paris", "" };
+    const generated = try drafts(std.testing.allocator, .optional_reverse, &values);
+    defer {
+        for (generated) |draft| draft.deinit(std.testing.allocator);
+        std.testing.allocator.free(generated);
+    }
+    try std.testing.expectEqual(@as(usize, 1), generated.len);
+}
+
 test "cloze generates one card per distinct cloze ordinal" {
-    const values = [_][]const u8{ "Paris is {{c1::France}} and Rome is {{c2::Italy}}; {{c1::Paris}} is a city.", "Europe" };
+    const values = [_][]const u8{ "Paris is {{c1::France}} and Rome is {{c2::Italy}}; {{c1::Paris}} is a city.", "" };
     const generated = try drafts(std.testing.allocator, .cloze, &values);
     defer {
         for (generated) |draft| draft.deinit(std.testing.allocator);
