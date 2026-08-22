@@ -1,10 +1,7 @@
 const std = @import("std");
-const c = @cImport({
-    @cInclude("sqlite3.h");
-});
-
 const content = @import("../content.zig");
 const sqlite = @import("sqlite.zig");
+const c = sqlite.c;
 
 const schema_sql =
     \\CREATE TABLE IF NOT EXISTS note_types (
