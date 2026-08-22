@@ -31,7 +31,8 @@ fn noteKindText(kind: content.NoteKind) []const u8 {
 
 fn ensureSqlite(db: *sqlite.Db, definition: content.NoteTypeDefinition, created_at_ms: i64) !void {
     try content.validateNoteType(definition);
-    const type_stmt = try prepare(db,
+    const type_stmt = try prepare(
+        db,
         "INSERT OR IGNORE INTO note_types(id, slug, name, kind, css, created_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6);",
     );
     defer _ = c.sqlite3_finalize(type_stmt);
@@ -44,7 +45,8 @@ fn ensureSqlite(db: *sqlite.Db, definition: content.NoteTypeDefinition, created_
     if (c.sqlite3_step(type_stmt) != c.SQLITE_DONE) return error.SqliteStepFailed;
 
     for (definition.fields) |field| {
-        const stmt = try prepare(db,
+        const stmt = try prepare(
+            db,
             "INSERT OR REPLACE INTO note_type_fields(note_type_id, ordinal, name) VALUES (?1, ?2, ?3);",
         );
         defer _ = c.sqlite3_finalize(stmt);
@@ -54,7 +56,8 @@ fn ensureSqlite(db: *sqlite.Db, definition: content.NoteTypeDefinition, created_
         if (c.sqlite3_step(stmt) != c.SQLITE_DONE) return error.SqliteStepFailed;
     }
     for (definition.templates) |template| {
-        const stmt = try prepare(db,
+        const stmt = try prepare(
+            db,
             "INSERT OR REPLACE INTO card_templates(note_type_id, ordinal, name, front, back) VALUES (?1, ?2, ?3, ?4, ?5);",
         );
         defer _ = c.sqlite3_finalize(stmt);
