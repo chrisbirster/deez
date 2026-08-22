@@ -2,6 +2,8 @@ name: release
 
 on:
   push:
+    branches:
+      - main
     tags:
       - 'v*'
 
@@ -9,7 +11,46 @@ permissions:
   contents: write
 
 jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      should_release: ${{ steps.release.outputs.should_release }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Resolve milestone release
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            TAG="$GITHUB_REF_NAME"
+            SHOULD_RELEASE=true
+          else
+            test -f VERSION
+            VERSION=$(tr -d '[:space:]' < VERSION)
+            if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+              echo "Invalid VERSION: $VERSION" >&2
+              exit 1
+            fi
+            TAG="v${VERSION}"
+            if git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
+              SHOULD_RELEASE=false
+            else
+              SHOULD_RELEASE=true
+            fi
+          fi
+
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "should_release=${SHOULD_RELEASE}" >> "$GITHUB_OUTPUT"
+          echo "release_tag=${TAG} should_release=${SHOULD_RELEASE}"
+
   build-macos:
+    needs: prepare
+    if: needs.prepare.outputs.should_release == 'true'
     strategy:
       matrix:
         include:
@@ -42,7 +83,10 @@ jobs:
           if-no-files-found: error
 
   publish:
-    needs: build-macos
+    needs:
+      - prepare
+      - build-macos
+    if: needs.prepare.outputs.should_release == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -66,10 +110,24 @@ jobs:
           printf '%s  %s\n' "$INTEL_SHA" deez-x86_64-apple-darwin.tar.gz >> dist/SHA256SUMS
           cat dist/SHA256SUMS
 
+      - name: Create release tag from main
+        if: startsWith(github.ref, 'refs/heads/')
+        shell: bash
+        env:
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" "$GITHUB_SHA" -m "Deez ${TAG}"
+          git push origin "$TAG"
+
       - name: Publish release assets
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ needs.prepare.outputs.tag }}
           generate_release_notes: true
+          prerelease: ${{ contains(needs.prepare.outputs.tag, '-') }}
           files: |
             dist/deez-aarch64-apple-darwin.tar.gz
             dist/deez-x86_64-apple-darwin.tar.gz
@@ -80,7 +138,7 @@ jobs:
         env:
           ARM_SHA: ${{ steps.checksums.outputs.arm_sha }}
           INTEL_SHA: ${{ steps.checksums.outputs.intel_sha }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ needs.prepare.outputs.tag }}
         run: |
           VERSION="${TAG#v}"
           git fetch origin main:refs/remotes/origin/main
