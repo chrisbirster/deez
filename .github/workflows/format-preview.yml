@@ -1,0 +1,19 @@
+name: format-preview
+
+on:
+  push:
+    branches:
+      - feature/rc1-content-model
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+      - name: Format and show diff
+        run: |
+          zig fmt src/root.zig src/storage/sqlite_content.zig
+          git diff -- src/root.zig src/storage/sqlite_content.zig
