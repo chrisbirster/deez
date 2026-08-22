@@ -5,6 +5,7 @@ const CardId = @import("card.zig").CardId;
 pub const HelpTopic = enum {
     general,
     deck,
+    nut,
     card,
     study,
     stats,
@@ -28,6 +29,8 @@ pub const Command = union(enum) {
     deck_delete: struct { deck_id: DeckId },
     deck_export: struct { deck_id: DeckId },
     deck_import: struct { path: []const u8 },
+    nut_export: struct { deck_id: DeckId },
+    nut_import: struct { path: []const u8 },
     card_add: struct { deck_id: DeckId, question: []const u8, answer: []const u8 },
     card_edit: struct { card_id: CardId, question: []const u8, answer: []const u8 },
     card_delete: struct { card_id: CardId },
@@ -76,6 +79,7 @@ fn requireText(text: []const u8) ![]const u8 {
 
 fn parseHelpTopic(text: []const u8) !HelpTopic {
     if (std.mem.eql(u8, text, "deck") or std.mem.eql(u8, text, "decks")) return .deck;
+    if (std.mem.eql(u8, text, "nut") or std.mem.eql(u8, text, "nuts")) return .nut;
     if (std.mem.eql(u8, text, "card") or std.mem.eql(u8, text, "cards")) return .card;
     if (std.mem.eql(u8, text, "study")) return .study;
     if (std.mem.eql(u8, text, "stats")) return .stats;
@@ -106,6 +110,24 @@ pub fn parse(args: []const []const u8) !Command {
         if (args.len == 3 and isHelp(args[2])) return .{ .help = .deck };
         try expectLength(args, 2);
         return .decks;
+    }
+    if (std.mem.eql(u8, command, "nuts")) {
+        if (args.len == 3 and isHelp(args[2])) return .{ .help = .nut };
+        try expectLength(args, 2);
+        return .decks;
+    }
+    if (std.mem.eql(u8, command, "nut")) {
+        if (args.len == 3 and isHelp(args[2])) return .{ .help = .nut };
+        if (args.len < 3) return error.InvalidArguments;
+        if (std.mem.eql(u8, args[2], "export")) {
+            try expectLength(args, 4);
+            return .{ .nut_export = .{ .deck_id = try parseId(args[3]) } };
+        }
+        if (std.mem.eql(u8, args[2], "import")) {
+            try expectLength(args, 4);
+            return .{ .nut_import = .{ .path = try requireText(args[3]) } };
+        }
+        return error.UnknownCommand;
     }
     if (std.mem.eql(u8, command, "cards")) {
         if (args.len == 3 and isHelp(args[2])) return .{ .help = .card };
@@ -274,14 +296,17 @@ pub const help_text =
     \\
     \\Usage:
     \\  deez setup
-    \\  deez help [deck|card|study|stats|inspect|fsrs|scheduler]
+    \\  deez help [deck|nut|card|study|stats|inspect|fsrs|scheduler]
     \\  deez decks
+    \\  deez nuts
+    \\  deez nut export <deck-id> > deck.nut
+    \\  deez nut import <deck.nut>
     \\  deez cards <deck-id>
     \\  deez deck add <name>
     \\  deez deck rename <deck-id> <name>
     \\  deez deck delete <deck-id> --yes
     \\  deez deck export <deck-id> > deck.json
-    \\  deez deck import <deck.json>
+    \\  deez deck import <deck.json|deck.nut>
     \\  deez card add <deck-id> <question> <answer>
     \\  deez card edit <card-id> <question> <answer>
     \\  deez card delete <card-id> --yes
@@ -302,7 +327,16 @@ const deck_help =
     \\  deez deck rename <deck-id> <name>
     \\  deez deck delete <deck-id> --yes
     \\  deez deck export <deck-id> > deck.json
-    \\  deez deck import <deck.json>
+    \\  deez deck import <deck.json|deck.nut>
+;
+const nut_help =
+    \\Nut commands:
+    \\  deez nuts
+    \\  deez nut export <deck-id> > deck.nut
+    \\  deez nut import <deck.nut>
+    \\
+    \\`deez nuts` lists the same stored decks as `deez decks`.
+    \\.nut files are line-oriented JSON deck files for sharing deck content.
 ;
 const card_help =
     \\Card commands:
@@ -332,6 +366,7 @@ pub fn helpText(topic: HelpTopic) []const u8 {
     return switch (topic) {
         .general => help_text,
         .deck => deck_help,
+        .nut => nut_help,
         .card => card_help,
         .study => study_help,
         .stats => stats_help,
@@ -378,6 +413,21 @@ test "parse card listing and add commands" {
     try std.testing.expectEqualStrings("What is BSON?", command.card_add.question);
 }
 
+test "deez nuts aliases deck listing" {
+    const args = [_][]const u8{ "deez", "nuts" };
+    try std.testing.expect((try parse(&args)) == .decks);
+}
+
+test "parse nut import and export commands" {
+    const export_args = [_][]const u8{ "deez", "nut", "export", "7" };
+    const exported = try parse(&export_args);
+    try std.testing.expectEqual(@as(DeckId, 7), exported.nut_export.deck_id);
+
+    const import_args = [_][]const u8{ "deez", "nut", "import", "zig.nut" };
+    const imported = try parse(&import_args);
+    try std.testing.expectEqualStrings("zig.nut", imported.nut_import.path);
+}
+
 test "parse JSON deck import and export commands" {
     const export_args = [_][]const u8{ "deez", "deck", "export", "7" };
     const exported = try parse(&export_args);
@@ -405,6 +455,11 @@ test "command-specific help parses" {
     const command = try parse(&args);
     try std.testing.expectEqual(HelpTopic.fsrs, command.help);
     try std.testing.expect(std.mem.indexOf(u8, helpText(command.help), "optimize") != null);
+
+    const nut_args = [_][]const u8{ "deez", "help", "nuts" };
+    const nut_command = try parse(&nut_args);
+    try std.testing.expectEqual(HelpTopic.nut, nut_command.help);
+    try std.testing.expect(std.mem.indexOf(u8, helpText(nut_command.help), ".nut") != null);
 }
 
 test "stats and inspect support machine-readable output" {
@@ -444,6 +499,9 @@ test "invalid ids and missing required arguments are rejected" {
         &.{ "deez", "deck", "add" },
         &.{ "deez", "deck", "export" },
         &.{ "deez", "deck", "import" },
+        &.{ "deez", "nut" },
+        &.{ "deez", "nut", "export" },
+        &.{ "deez", "nut", "import" },
         &.{ "deez", "cards" },
         &.{ "deez", "card" },
         &.{ "deez", "card", "add", "1" },

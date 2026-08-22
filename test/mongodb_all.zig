@@ -8,6 +8,8 @@ test {
     _ = @import("mongodb_parameter_scopes.zig");
     _ = @import("mongodb_interchange.zig");
     _ = @import("mongodb_deck_json.zig");
+    _ = @import("mongodb_nut.zig");
+    _ = @import("mongodb_content.zig");
     _ = @import("mongodb_recovery.zig");
     _ = @import("mongodb_scheduler_migration.zig");
 }

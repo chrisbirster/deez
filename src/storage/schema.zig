@@ -1,4 +1,4 @@
-pub const current_version: i32 = 1;
+pub const current_version: i32 = 2;
 
 pub const migration_v1 =
     \\PRAGMA foreign_keys = ON;
@@ -92,4 +92,52 @@ pub const migration_v1 =
     \\);
     \\CREATE INDEX IF NOT EXISTS scheduler_state_due_idx ON scheduler_state(due_at_ms);
     \\PRAGMA user_version = 1;
+;
+
+pub const migration_v2 =
+    \\CREATE TABLE IF NOT EXISTS note_types (
+    \\    id INTEGER PRIMARY KEY,
+    \\    slug TEXT NOT NULL UNIQUE,
+    \\    name TEXT NOT NULL,
+    \\    kind TEXT NOT NULL,
+    \\    css TEXT NOT NULL,
+    \\    created_at_ms INTEGER NOT NULL
+    \\);
+    \\CREATE TABLE IF NOT EXISTS note_type_fields (
+    \\    note_type_id INTEGER NOT NULL REFERENCES note_types(id) ON DELETE CASCADE,
+    \\    ordinal INTEGER NOT NULL,
+    \\    name TEXT NOT NULL,
+    \\    PRIMARY KEY(note_type_id, ordinal),
+    \\    UNIQUE(note_type_id, name)
+    \\);
+    \\CREATE TABLE IF NOT EXISTS card_templates (
+    \\    note_type_id INTEGER NOT NULL REFERENCES note_types(id) ON DELETE CASCADE,
+    \\    ordinal INTEGER NOT NULL,
+    \\    name TEXT NOT NULL,
+    \\    front TEXT NOT NULL,
+    \\    back TEXT NOT NULL,
+    \\    PRIMARY KEY(note_type_id, ordinal)
+    \\);
+    \\CREATE TABLE IF NOT EXISTS notes (
+    \\    id INTEGER PRIMARY KEY,
+    \\    note_type_id INTEGER NOT NULL REFERENCES note_types(id),
+    \\    tags_json TEXT NOT NULL DEFAULT '[]',
+    \\    created_at_ms INTEGER NOT NULL,
+    \\    updated_at_ms INTEGER NOT NULL
+    \\);
+    \\CREATE INDEX IF NOT EXISTS notes_note_type_idx ON notes(note_type_id);
+    \\CREATE TABLE IF NOT EXISTS note_fields (
+    \\    note_id INTEGER NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+    \\    ordinal INTEGER NOT NULL,
+    \\    value TEXT NOT NULL,
+    \\    PRIMARY KEY(note_id, ordinal)
+    \\);
+    \\CREATE TABLE IF NOT EXISTS generated_cards (
+    \\    card_id INTEGER PRIMARY KEY REFERENCES cards(id) ON DELETE CASCADE,
+    \\    note_id INTEGER NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+    \\    template_ordinal INTEGER NOT NULL,
+    \\    generation_key TEXT NOT NULL UNIQUE
+    \\);
+    \\CREATE INDEX IF NOT EXISTS generated_cards_note_idx ON generated_cards(note_id, template_ordinal);
+    \\PRAGMA user_version = 2;
 ;
