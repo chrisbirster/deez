@@ -4,6 +4,7 @@ pub const time = @import("time.zig");
 pub const card = @import("card.zig");
 pub const deck = @import("deck.zig");
 pub const content = @import("content.zig");
+pub const card_types = @import("card_types.zig");
 pub const review = @import("review.zig");
 pub const fsrs = @import("fsrs/root.zig");
 pub const storage = @import("storage/root.zig");
