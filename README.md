@@ -89,6 +89,14 @@ deez cards 1
 deez study 1
 ```
 
+And, because this project is called Deez:
+
+```bash
+deez nuts
+```
+
+`deez nuts` is a real alias of `deez decks`; it lists the same persisted deck records.
+
 Study ratings are:
 
 ```text
@@ -107,9 +115,13 @@ deez study 1 --order new-first
 deez study 1 --shuffle
 ```
 
-## Downloadable JSON decks
+## Shareable deck files
 
-A shareable Deez deck is one JSON file containing the deck name and cards:
+Deez supports two content-only deck formats: normal `.json` and native `.nut` files. Both can be imported into either SQLite or MongoDB and both intentionally exclude personal review history and FSRS state.
+
+### JSON
+
+A JSON deck is one document containing the deck name and cards:
 
 ```json
 {
@@ -131,23 +143,43 @@ A shareable Deez deck is one JSON file containing the deck name and cards:
 }
 ```
 
-Export any deck to a normal `.json` file:
+Export and import:
 
 ```bash
 deez deck export 1 > zig-basics.json
+deez deck import zig-basics.json
 ```
 
-Download or copy that file to another machine and import it:
+### `.nut`
+
+`.nut` is Deez's native line-oriented deck format. It is NDJSON: every non-empty line is an ordinary JSON object.
+
+```text
+{"kind":"deck","format":"deez.nut","version":1,"name":"Zig Basics"}
+{"kind":"card","question":"What is Zig?","answer":"A systems programming language"}
+{"kind":"card","question":"What is comptime?","answer":"Compile-time execution"}
+```
+
+Export and import:
 
 ```bash
-deez deck import zig-basics.json
+deez nut export 1 > zig-basics.nut
+deez nut import zig-basics.nut
+```
+
+The normal deck importer also recognizes the `.nut` extension:
+
+```bash
+deez deck import zig-basics.nut
 ```
 
 Import always creates a new deck in the currently configured database, whether that database is SQLite or MongoDB.
 
-JSON deck files are intentionally **content-only**. They do not contain the previous user's review history, due dates, stability, difficulty, or other personal FSRS state. A downloaded deck therefore starts fresh for the person importing it.
+Shared deck files are intentionally **content-only**. They do not contain the previous user's review history, due dates, stability, difficulty, or other personal FSRS state. A downloaded deck therefore starts fresh for the person importing it.
 
-Use Deez backup/restore—not deck JSON—when you need a full-fidelity copy of your own study data and scheduler history.
+Use Deez backup/restore—not JSON or `.nut`—when you need a full-fidelity copy of your own study data and scheduler history.
+
+See `docs/nut-format.md` for the `.nut` format contract.
 
 ## Inspect and stats
 
@@ -201,7 +233,7 @@ The Deez logical archive preserves full personal study state, including:
 - scheduler defaults and deck/group pins
 - ID counters
 
-This is deliberately different from a downloadable JSON deck. JSON is for sharing deck content; backup/restore is for preserving a user's database and review history.
+This is deliberately different from shareable deck files. JSON and `.nut` are for sharing deck content; backup/restore is for preserving a user's database and review history.
 
 See `docs/interchange.md` and `docs/mongodb.md`.
 
@@ -255,6 +287,7 @@ Set `DEEZ_MONGO_BENCH_URI` to include the Mongo due-queue workload. See `docs/be
 ## Documentation
 
 - `docs/cli.md` — CLI reference
+- `docs/nut-format.md` — native `.nut` NDJSON deck format
 - `docs/fsrs-7-parity.md` — FSRS-7 reference/parity policy
 - `docs/optimizer.md` — optimization and evaluation methodology
 - `docs/interchange.md` — full-fidelity interchange format and migration safety
