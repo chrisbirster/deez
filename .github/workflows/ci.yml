@@ -42,13 +42,17 @@ jobs:
 
           HOME="$first_home" ./zig-out/bin/deez deck export 1 > /tmp/zig-basics.json
           grep -q '"format": "deez.deck"' /tmp/zig-basics.json
+          grep -q '"version": 2' /tmp/zig-basics.json
           grep -q '"name": "Zig Basics"' /tmp/zig-basics.json
+          grep -q '"note_type": "basic"' /tmp/zig-basics.json
 
           HOME="$first_home" ./zig-out/bin/deez nut export 1 > /tmp/zig-basics.nut
           test "$(wc -l < /tmp/zig-basics.nut | tr -d ' ')" = "2"
           head -n 1 /tmp/zig-basics.nut | grep -q '"kind":"deck"'
           head -n 1 /tmp/zig-basics.nut | grep -q '"format":"deez.nut"'
-          tail -n 1 /tmp/zig-basics.nut | grep -q '"kind":"card"'
+          head -n 1 /tmp/zig-basics.nut | grep -q '"version":2'
+          tail -n 1 /tmp/zig-basics.nut | grep -q '"kind":"note"'
+          tail -n 1 /tmp/zig-basics.nut | grep -q '"note_type":"basic"'
 
           second_home=$(mktemp -d)
           HOME="$second_home" ./zig-out/bin/deez deck import /tmp/zig-basics.json </dev/null
@@ -63,6 +67,19 @@ jobs:
           fourth_home=$(mktemp -d)
           HOME="$fourth_home" ./zig-out/bin/deez deck import /tmp/zig-basics.nut </dev/null
           HOME="$fourth_home" ./zig-out/bin/deez decks | grep -q "Zig Basics"
+
+          rich_home=$(mktemp -d)
+          HOME="$rich_home" ./zig-out/bin/deez deck add "Geography" </dev/null
+          HOME="$rich_home" ./zig-out/bin/deez note add 1 reverse "France" "Paris"
+          HOME="$rich_home" ./zig-out/bin/deez notes 1 | grep -q "basic-reverse"
+          test "$(HOME="$rich_home" ./zig-out/bin/deez cards 1 | tail -n +2 | wc -l | tr -d ' ')" = "2"
+          HOME="$rich_home" ./zig-out/bin/deez nut export 1 > /tmp/geography.nut
+          grep -q '"note_type":"basic-reverse"' /tmp/geography.nut
+
+          rich_import_home=$(mktemp -d)
+          HOME="$rich_import_home" ./zig-out/bin/deez nut import /tmp/geography.nut </dev/null
+          HOME="$rich_import_home" ./zig-out/bin/deez notes 1 | grep -q "basic-reverse"
+          test "$(HOME="$rich_import_home" ./zig-out/bin/deez cards 1 | tail -n +2 | wc -l | tr -d ' ')" = "2"
       - name: Test
         run: zig build test
       - name: Benchmark context
