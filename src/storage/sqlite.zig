@@ -76,6 +76,7 @@ pub const Db = struct {
         const version = try self.userVersion();
         if (version > schema.current_version) return error.DatabaseTooNew;
         if (version < 1) try self.exec(schema.migration_v1);
+        if (version < 2) try self.exec(schema.migration_v2);
     }
 
     pub fn userVersion(self: *Db) !i32 {
