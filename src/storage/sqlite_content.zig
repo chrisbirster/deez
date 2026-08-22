@@ -99,7 +99,8 @@ pub fn ensureSchema(db: *sqlite.Db) !void {
 pub fn ensureBuiltInBasic(db: *sqlite.Db, created_at_ms: i64) !content.NoteTypeId {
     try ensureSchema(db);
 
-    const insert_type = try prepare(db,
+    const insert_type = try prepare(
+        db,
         "INSERT OR IGNORE INTO note_types(id, slug, name, kind, css, created_at_ms) VALUES (1, 'basic', 'Basic', 'basic', ?1, ?2);",
     );
     defer _ = c.sqlite3_finalize(insert_type);
@@ -108,7 +109,8 @@ pub fn ensureBuiltInBasic(db: *sqlite.Db, created_at_ms: i64) !content.NoteTypeI
     try stepDone(insert_type);
 
     for (content.basic_note_type.fields) |field| {
-        const stmt = try prepare(db,
+        const stmt = try prepare(
+            db,
             "INSERT OR IGNORE INTO note_type_fields(note_type_id, ordinal, name) VALUES (1, ?1, ?2);",
         );
         defer _ = c.sqlite3_finalize(stmt);
@@ -118,7 +120,8 @@ pub fn ensureBuiltInBasic(db: *sqlite.Db, created_at_ms: i64) !content.NoteTypeI
     }
 
     for (content.basic_note_type.templates) |template| {
-        const stmt = try prepare(db,
+        const stmt = try prepare(
+            db,
             "INSERT OR IGNORE INTO card_templates(note_type_id, ordinal, name, front, back) VALUES (1, ?1, ?2, ?3, ?4);",
         );
         defer _ = c.sqlite3_finalize(stmt);
@@ -138,7 +141,8 @@ fn insertNote(
     tags_json: []const u8,
     created_at_ms: i64,
 ) !content.NoteId {
-    const stmt = try prepare(db,
+    const stmt = try prepare(
+        db,
         "INSERT INTO notes(note_type_id, tags_json, created_at_ms, updated_at_ms) VALUES (?1, ?2, ?3, ?3);",
     );
     defer _ = c.sqlite3_finalize(stmt);
@@ -149,7 +153,8 @@ fn insertNote(
     const note_id: content.NoteId = @intCast(c.sqlite3_last_insert_rowid(db.handle));
 
     for (fields) |field| {
-        const field_stmt = try prepare(db,
+        const field_stmt = try prepare(
+            db,
             "INSERT INTO note_fields(note_id, ordinal, value) VALUES (?1, ?2, ?3);",
         );
         defer _ = c.sqlite3_finalize(field_stmt);
@@ -181,7 +186,8 @@ fn linkGeneratedCard(
 ) !void {
     const key = try content.generationKey(allocator, note_id, template_ordinal);
     defer allocator.free(key);
-    const stmt = try prepare(db,
+    const stmt = try prepare(
+        db,
         "INSERT INTO generated_cards(card_id, note_id, template_ordinal, generation_key) VALUES (?1, ?2, ?3, ?4);",
     );
     defer _ = c.sqlite3_finalize(stmt);
@@ -263,7 +269,8 @@ pub fn getNote(
     note_id: content.NoteId,
 ) !?content.OwnedNote {
     try ensureSchema(db);
-    const stmt = try prepare(db,
+    const stmt = try prepare(
+        db,
         "SELECT note_type_id, tags_json, created_at_ms, updated_at_ms FROM notes WHERE id = ?1;",
     );
     defer _ = c.sqlite3_finalize(stmt);
@@ -275,7 +282,8 @@ pub fn getNote(
     const tags_json = try columnTextOwned(allocator, stmt, 1);
     errdefer allocator.free(tags_json);
 
-    const field_stmt = try prepare(db,
+    const field_stmt = try prepare(
+        db,
         "SELECT ordinal, value FROM note_fields WHERE note_id = ?1 ORDER BY ordinal;",
     );
     defer _ = c.sqlite3_finalize(field_stmt);
@@ -312,7 +320,8 @@ pub fn cardSource(
     card_id: u64,
 ) !?content.GeneratedCardSource {
     try ensureSchema(db);
-    const stmt = try prepare(db,
+    const stmt = try prepare(
+        db,
         "SELECT note_id, template_ordinal, generation_key FROM generated_cards WHERE card_id = ?1;",
     );
     defer _ = c.sqlite3_finalize(stmt);
