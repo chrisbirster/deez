@@ -60,18 +60,21 @@ printf '%s\n' "$?"   # 2
 
 ```text
 deez decks
+deez nuts
 deez cards <deck-id>
 deez deck add <name>
 deez deck rename <deck-id> <name>
 deez deck delete <deck-id> --yes
 deez deck export <deck-id> > deck.json
-deez deck import <deck.json>
+deez deck import <deck.json|deck.nut>
+deez nut export <deck-id> > deck.nut
+deez nut import <deck.nut>
 deez card add <deck-id> <question> <answer>
 deez card edit <card-id> <question> <answer>
 deez card delete <card-id> --yes
 ```
 
-A deck is the top-level content container. Cards belong to exactly one deck. Destructive operations require explicit `--yes` intent.
+A deck is the top-level content container. Cards belong to exactly one deck. `deez nuts` is intentionally an alias of `deez decks`; it does not introduce a second persisted entity. Destructive operations require explicit `--yes` intent.
 
 ### Shareable JSON decks
 
@@ -102,7 +105,32 @@ deez deck import zig-basics.json
 
 Import creates a new deck and new cards in the currently configured backend. The same JSON file can therefore be loaded into SQLite or MongoDB without changing the file.
 
-Deck JSON intentionally excludes personal review history, scheduler state, due dates, difficulty, stability, and parameter-set identity. A downloaded deck starts fresh for its importer. Use backup/restore for full-fidelity personal data migration.
+### Native `.nut` decks
+
+`.nut` is Deez's native shareable deck format. It is NDJSON: one complete JSON object per non-empty line.
+
+```text
+{"kind":"deck","format":"deez.nut","version":1,"name":"Zig Basics"}
+{"kind":"card","question":"What is Zig?","answer":"A systems programming language"}
+{"kind":"card","question":"What is comptime?","answer":"Compile-time execution"}
+```
+
+Export and import with:
+
+```bash
+deez nut export 1 > zig-basics.nut
+deez nut import zig-basics.nut
+```
+
+The general deck importer also recognizes `.nut` by extension:
+
+```bash
+deez deck import zig-basics.nut
+```
+
+JSON deck files and `.nut` files intentionally exclude personal review history, scheduler state, due dates, difficulty, stability, and parameter-set identity. A downloaded deck starts fresh for its importer. Use backup/restore for full-fidelity personal data migration.
+
+See `docs/nut-format.md` for the `.nut` versioning and validation rules.
 
 ## Study
 
@@ -124,7 +152,7 @@ deez scheduler list
 
 ## Backup and restore
 
-The existing logical archive is separate from shareable deck JSON. It is intended to preserve a user's complete study data and scheduler metadata.
+The existing logical archive is separate from shareable JSON and `.nut` decks. It is intended to preserve a user's complete study data and scheduler metadata.
 
 MongoDB backups are pipe-friendly:
 
@@ -162,6 +190,7 @@ deez fsrs retention
 deez --help
 deez help
 deez help deck
+deez help nut
 deez help card
 deez help study
 deez help stats
