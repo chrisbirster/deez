@@ -3,6 +3,7 @@ const Io = std.Io;
 const cli = @import("cli.zig");
 const config = @import("config.zig");
 const deck_json = @import("deck_json.zig");
+const nut = @import("nut.zig");
 const fsrs = @import("fsrs/root.zig");
 const storage = @import("storage/root.zig");
 const study_mod = @import("study.zig");
@@ -184,7 +185,19 @@ fn runWithStore(
         .deck_import => |args| {
             const bytes = try Io.Dir.cwd().readFileAlloc(io, args.path, allocator, .limited(64 * 1024 * 1024));
             defer allocator.free(bytes);
-            const result = try deck_json.importSlice(allocator, store, bytes, now_ms);
+            if (std.mem.endsWith(u8, args.path, ".nut")) {
+                const result = try nut.importSlice(allocator, store, bytes, now_ms);
+                try out.print("Imported deck {d} ({d} cards).\n", .{ result.deck_id, result.card_count });
+            } else {
+                const result = try deck_json.importSlice(allocator, store, bytes, now_ms);
+                try out.print("Imported deck {d} ({d} cards).\n", .{ result.deck_id, result.card_count });
+            }
+        },
+        .nut_export => |args| try nut.exportDeck(allocator, store, args.deck_id, out),
+        .nut_import => |args| {
+            const bytes = try Io.Dir.cwd().readFileAlloc(io, args.path, allocator, .limited(64 * 1024 * 1024));
+            defer allocator.free(bytes);
+            const result = try nut.importSlice(allocator, store, bytes, now_ms);
             try out.print("Imported deck {d} ({d} cards).\n", .{ result.deck_id, result.card_count });
         },
         .card_add => |args| {

@@ -13,6 +13,7 @@ pub const scheduler_migration = @import("scheduler_migration.zig");
 pub const cli = @import("cli.zig");
 pub const config = @import("config.zig");
 pub const deck_json = @import("deck_json.zig");
+pub const nut = @import("nut.zig");
 pub const backup_cli = @import("backup_cli.zig");
 pub const app = @import("app.zig");
 pub const interchange = @import("interchange.zig");

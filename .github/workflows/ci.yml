@@ -22,7 +22,7 @@ jobs:
         run: zig fmt --check build.zig src test
       - name: Build
         run: zig build
-      - name: First-run and JSON deck smoke
+      - name: First-run and shareable deck smoke
         shell: bash
         run: |
           set -euo pipefail
@@ -38,14 +38,31 @@ jobs:
 
           HOME="$first_home" ./zig-out/bin/deez deck add "Zig Basics"
           HOME="$first_home" ./zig-out/bin/deez card add 1 "What is Zig?" "A systems programming language"
+          HOME="$first_home" ./zig-out/bin/deez nuts | grep -q "Zig Basics"
+
           HOME="$first_home" ./zig-out/bin/deez deck export 1 > /tmp/zig-basics.json
           grep -q '"format": "deez.deck"' /tmp/zig-basics.json
           grep -q '"name": "Zig Basics"' /tmp/zig-basics.json
+
+          HOME="$first_home" ./zig-out/bin/deez nut export 1 > /tmp/zig-basics.nut
+          test "$(wc -l < /tmp/zig-basics.nut | tr -d ' ')" = "2"
+          head -n 1 /tmp/zig-basics.nut | grep -q '"kind":"deck"'
+          head -n 1 /tmp/zig-basics.nut | grep -q '"format":"deez.nut"'
+          tail -n 1 /tmp/zig-basics.nut | grep -q '"kind":"card"'
 
           second_home=$(mktemp -d)
           HOME="$second_home" ./zig-out/bin/deez deck import /tmp/zig-basics.json </dev/null
           HOME="$second_home" ./zig-out/bin/deez decks | grep -q "Zig Basics"
           HOME="$second_home" ./zig-out/bin/deez cards 1 | grep -q "What is Zig?"
+
+          third_home=$(mktemp -d)
+          HOME="$third_home" ./zig-out/bin/deez nut import /tmp/zig-basics.nut </dev/null
+          HOME="$third_home" ./zig-out/bin/deez nuts | grep -q "Zig Basics"
+          HOME="$third_home" ./zig-out/bin/deez cards 1 | grep -q "What is Zig?"
+
+          fourth_home=$(mktemp -d)
+          HOME="$fourth_home" ./zig-out/bin/deez deck import /tmp/zig-basics.nut </dev/null
+          HOME="$fourth_home" ./zig-out/bin/deez decks | grep -q "Zig Basics"
       - name: Test
         run: zig build test
       - name: Benchmark context
