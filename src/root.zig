@@ -6,6 +6,7 @@ pub const deck = @import("deck.zig");
 pub const content = @import("content.zig");
 pub const card_types = @import("card_types.zig");
 pub const portable_content = @import("portable_content.zig");
+pub const render = @import("render.zig");
 pub const review = @import("review.zig");
 pub const fsrs = @import("fsrs/root.zig");
 pub const storage = @import("storage/root.zig");
