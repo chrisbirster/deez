@@ -29,7 +29,7 @@ fn printHelp(init: std.process.Init, topic: deez.cli.HelpTopic) !void {
     defer out.flush() catch {};
 
     if (topic == .general) {
-        try out.print("{s}\n{s}\n{s}", .{ deez.cli.help_text, deez.notes_cli.help_text, deez.backup_cli.help_text });
+        try out.print("{s}\n{s}\n{s}\n{s}", .{ deez.cli.help_text, deez.notes_cli.help_text, deez.backup_cli.help_text, deez.rich_cli.help_text });
     } else {
         try out.writeAll(deez.cli.helpText(topic));
     }
@@ -64,10 +64,20 @@ pub fn main(init: std.process.Init) !void {
         return;
     }
 
+    if (deez.rich_cli.isCommand(args)) {
+        deez.rich_cli.run(init, args) catch |err| {
+            switch (err) {
+                error.InvalidArguments, error.InvalidId, error.UnknownCommand => printErrorAndExit(init, err, deez.rich_cli.help_text),
+                else => return err,
+            }
+        };
+        return;
+    }
+
     const command = deez.cli.parse(args) catch |err| {
-        var help_buffer: [8192]u8 = undefined;
+        var help_buffer: [12288]u8 = undefined;
         var writer = Io.Writer.fixed(&help_buffer);
-        writer.print("{s}\n{s}\n{s}", .{ deez.cli.help_text, deez.notes_cli.help_text, deez.backup_cli.help_text }) catch
+        writer.print("{s}\n{s}\n{s}\n{s}", .{ deez.cli.help_text, deez.notes_cli.help_text, deez.backup_cli.help_text, deez.rich_cli.help_text }) catch
             printErrorAndExit(init, err, deez.cli.help_text);
         printErrorAndExit(init, err, writer.buffered());
     };

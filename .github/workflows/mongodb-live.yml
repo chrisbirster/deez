@@ -81,6 +81,32 @@ jobs:
           grep -q 'decks=1 cards=1 reviews=0 unsupported=0' /tmp/deez-restore.txt
           ./zig-out/bin/deez stats --json | tee /tmp/deez-restored-stats.txt
           grep -q '"decks":1,"cards":1,"due":1,"reviews":0' /tmp/deez-restored-stats.txt
+      - name: Test rich-media sack through MongoDB
+        working-directory: deez
+        env:
+          DEEZ_STORAGE: mongodb
+        run: |
+          set -euo pipefail
+
+          export_home=$(mktemp -d)
+          printf 'mongo-rich-media-test-bytes' > /tmp/deez-mongo-diagram.png
+          media_ref=$(HOME="$export_home" ./zig-out/bin/deez media add /tmp/deez-mongo-diagram.png | head -n 1)
+          echo "$media_ref" | grep -Eq '^deez-media://sha256:[0-9a-f]{64}$'
+          media_hash=${media_ref#deez-media://sha256:}
+
+          export DEEZ_MONGO_URI='mongodb://localhost:27019/deez_sack_export?replicaSet=rs0'
+          HOME="$export_home" ./zig-out/bin/deez deck add "Mongo Rich Media"
+          HOME="$export_home" ./zig-out/bin/deez note add 1 basic "Mongo image" "<img src=\"$media_ref\">"
+          HOME="$export_home" ./zig-out/bin/deez sack export 1 /tmp/mongo-rich-media.sack
+          test -s /tmp/mongo-rich-media.sack
+          unzip -l /tmp/mongo-rich-media.sack | grep -q "media/sha256/$media_hash"
+
+          import_home=$(mktemp -d)
+          export DEEZ_MONGO_URI='mongodb://localhost:27019/deez_sack_import?replicaSet=rs0'
+          HOME="$import_home" ./zig-out/bin/deez sack import /tmp/mongo-rich-media.sack
+          HOME="$import_home" ./zig-out/bin/deez decks | grep -q "Mongo Rich Media"
+          HOME="$import_home" ./zig-out/bin/deez notes 1 | grep -q "Mongo image"
+          test -f "$import_home/.local/share/deez/media/sha256/${media_hash:0:2}/$media_hash"
       - name: Mongo benchmark context
         working-directory: deez
         run: |
