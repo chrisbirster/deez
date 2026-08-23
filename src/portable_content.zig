@@ -24,14 +24,8 @@ pub const NoteInput = struct {
 };
 
 pub fn slugForNoteType(note_type_id: content.NoteTypeId) ![]const u8 {
-    return switch (note_type_id) {
-        1 => "basic",
-        2 => "basic-reverse",
-        3 => "optional-reverse",
-        4 => "cloze",
-        5 => "type-answer",
-        else => error.UnsupportedPortableNoteType,
-    };
+    const kind = content.BuiltInNoteType.fromId(note_type_id) catch return error.UnsupportedPortableNoteType;
+    return kind.definition().slug;
 }
 
 fn contains(ids: []const content.NoteId, id: content.NoteId) bool {
@@ -169,4 +163,11 @@ test "portable deck collection deduplicates reverse generated cards" {
     try std.testing.expectEqual(@as(usize, 1), notes.len);
     try std.testing.expectEqualStrings("basic-reverse", notes[0].note_type);
     try std.testing.expectEqual(@as(usize, 2), notes[0].fields.len);
+}
+
+test "portable note type slugs include interaction types" {
+    try std.testing.expectEqualStrings("multiple-choice", try slugForNoteType(6));
+    try std.testing.expectEqualStrings("multiple-select", try slugForNoteType(7));
+    try std.testing.expectEqualStrings("ordering", try slugForNoteType(8));
+    try std.testing.expectEqualStrings("image-occlusion", try slugForNoteType(9));
 }
