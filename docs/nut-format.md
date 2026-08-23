@@ -41,8 +41,14 @@ Version 2 supports Deez's built-in logical note types:
 - `optional-reverse`
 - `cloze`
 - `type-answer`
+- `multiple-choice`
+- `multiple-select`
+- `ordering`
+- `image-occlusion`
 
-The number and meaning of `fields` are defined by the note type.
+The number and meaning of `fields` are defined by the note type. The structured field schemas for multiple choice, multiple select, ordering, and image occlusion are documented in `docs/interactions.md`.
+
+Interaction data remains ordinary field text in `.nut` v2. Structured values such as choices, correct IDs, ordered items, and image masks are encoded as JSON strings inside the `fields` array. This keeps the outer `.nut` record model stable while allowing future terminal, desktop, mobile, and web clients to render richer interactions.
 
 ## Media references
 
@@ -60,7 +66,7 @@ For example, a field may contain:
 <img src="deez-media://sha256:0123456789abcdef...">
 ```
 
-The binary media is not embedded in the `.nut`. Use a `.sack` bundle when the deck and its referenced media need to travel together.
+Image-occlusion notes use the same media reference as their `Image` field. The binary media is not embedded in the `.nut`. Use a `.sack` bundle when the deck and its referenced media need to travel together.
 
 ## Commands
 
@@ -114,5 +120,6 @@ This means a deck downloaded from someone else starts with fresh study history a
 - A file may contain exactly one deck record.
 - Unknown record kinds are rejected rather than silently ignored.
 - Empty deck names and invalid note fields are rejected.
+- Structured interaction fields are validated during note generation/import rather than silently accepting malformed choices, IDs, ordering data, or masks.
 
 The line-oriented layout leaves room for future record kinds without requiring one giant JSON document or loading the entire logical deck structure into memory at once.
