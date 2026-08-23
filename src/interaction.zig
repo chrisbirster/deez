@@ -184,22 +184,15 @@ fn validateMask(mask: OcclusionMaskInput) !void {
     if (mask.x + mask.width > 1.0000001 or mask.y + mask.height > 1.0000001) return error.InvalidOcclusionRect;
 }
 
-fn parseMasks(
-    allocator: std.mem.Allocator,
-    image_ref: []const u8,
-    masks_json: []const u8,
-) !std.json.Parsed([]const OcclusionMaskInput) {
+fn validateMasks(image_ref: []const u8, masks: []const OcclusionMaskInput) !void {
     if (media.parseReference(image_ref) == null) return error.InvalidOcclusionMediaReference;
-    var parsed = try std.json.parseFromSlice([]const OcclusionMaskInput, allocator, masks_json, .{ .ignore_unknown_fields = false });
-    errdefer parsed.deinit();
-    if (parsed.value.len == 0) return error.OcclusionMaskRequired;
-    for (parsed.value, 0..) |mask, index| {
+    if (masks.len == 0) return error.OcclusionMaskRequired;
+    for (masks, 0..) |mask, index| {
         try validateMask(mask);
-        for (parsed.value[0..index]) |previous| {
+        for (masks[0..index]) |previous| {
             if (previous.id == mask.id) return error.DuplicateOcclusionId;
         }
     }
-    return parsed;
 }
 
 pub fn occlusionIds(
@@ -207,8 +200,9 @@ pub fn occlusionIds(
     image_ref: []const u8,
     masks_json: []const u8,
 ) ![]u32 {
-    var parsed = try parseMasks(allocator, image_ref, masks_json);
+    var parsed = try std.json.parseFromSlice([]const OcclusionMaskInput, allocator, masks_json, .{ .ignore_unknown_fields = false });
     defer parsed.deinit();
+    try validateMasks(image_ref, parsed.value);
     const ids = try allocator.alloc(u32, parsed.value.len);
     for (parsed.value, 0..) |mask, index| ids[index] = mask.id;
     std.mem.sort(u32, ids, {}, std.sort.asc(u32));
@@ -222,8 +216,9 @@ pub fn imageOcclusion(
     extra: []const u8,
     mask_id: u32,
 ) !CardText {
-    var parsed = try parseMasks(allocator, image_ref, masks_json);
+    var parsed = try std.json.parseFromSlice([]const OcclusionMaskInput, allocator, masks_json, .{ .ignore_unknown_fields = false });
     defer parsed.deinit();
+    try validateMasks(image_ref, parsed.value);
     const mask = blk: {
         for (parsed.value) |candidate| {
             if (candidate.id == mask_id) break :blk candidate;
