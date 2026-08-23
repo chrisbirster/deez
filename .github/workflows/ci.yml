@@ -88,6 +88,28 @@ jobs:
           HOME="$rich_import_home" ./zig-out/bin/deez nut import /tmp/geography.nut </dev/null
           HOME="$rich_import_home" ./zig-out/bin/deez notes 1 | grep -q "basic-reverse"
           test "$(HOME="$rich_import_home" ./zig-out/bin/deez cards 1 | tail -n +2 | wc -l | tr -d ' ')" = "2"
+
+          media_home=$(mktemp -d)
+          printf 'deez-test-image-bytes' > /tmp/deez-diagram.png
+          media_ref=$(HOME="$media_home" ./zig-out/bin/deez media add /tmp/deez-diagram.png | head -n 1)
+          echo "$media_ref" | grep -Eq '^deez-media://sha256:[0-9a-f]{64}$'
+          media_hash=${media_ref#deez-media://sha256:}
+          test -f "$media_home/.local/share/deez/media/sha256/${media_hash:0:2}/$media_hash"
+          test -f "$media_home/.local/share/deez/media/sha256/${media_hash:0:2}/$media_hash.json"
+
+          HOME="$media_home" ./zig-out/bin/deez deck add "Rich Media" </dev/null
+          HOME="$media_home" ./zig-out/bin/deez note add 1 basic "What is pictured?" "<img src=\"$media_ref\">"
+          HOME="$media_home" ./zig-out/bin/deez sack export 1 /tmp/rich-media.sack
+          test -s /tmp/rich-media.sack
+          unzip -l /tmp/rich-media.sack | grep -q 'manifest.json'
+          unzip -l /tmp/rich-media.sack | grep -q 'deck.nut'
+          unzip -l /tmp/rich-media.sack | grep -q "media/sha256/$media_hash"
+
+          media_import_home=$(mktemp -d)
+          HOME="$media_import_home" ./zig-out/bin/deez sack import /tmp/rich-media.sack </dev/null
+          HOME="$media_import_home" ./zig-out/bin/deez decks | grep -q "Rich Media"
+          HOME="$media_import_home" ./zig-out/bin/deez notes 1 | grep -q "What is pictured?"
+          test -f "$media_import_home/.local/share/deez/media/sha256/${media_hash:0:2}/$media_hash"
       - name: Test
         run: zig build test
       - name: Benchmark context
