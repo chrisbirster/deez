@@ -415,10 +415,9 @@ test "sack archive verifies CRC" {
     const source = [_]ZipEntry{.{ .name = "deck.nut", .data = "abc" }};
     const archive = try buildZip(std.testing.allocator, &source);
     defer std.testing.allocator.free(archive);
-    archive[archive.len - 23] ^= 1;
-    _ = parseZip(std.testing.allocator, archive) catch |err| {
-        try std.testing.expect(err == error.SackCrcMismatch or err == error.InvalidSackArchive or err == error.TruncatedSackArchive);
-        return;
-    };
-    return error.TestExpectedError;
+    archive[30 + "deck.nut".len] ^= 1;
+    try std.testing.expectError(
+        error.SackCrcMismatch,
+        parseZip(std.testing.allocator, archive),
+    );
 }
