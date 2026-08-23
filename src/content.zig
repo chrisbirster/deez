@@ -11,6 +11,33 @@ pub const NoteKind = enum {
     cloze,
 };
 
+pub const BuiltInNoteType = enum {
+    basic,
+    basic_reverse,
+    optional_reverse,
+    cloze,
+    type_answer,
+
+    pub fn definition(self: BuiltInNoteType) NoteTypeDefinition {
+        return switch (self) {
+            .basic => basic_note_type,
+            .basic_reverse => basic_reverse_note_type,
+            .optional_reverse => optional_reverse_note_type,
+            .cloze => cloze_note_type,
+            .type_answer => type_answer_note_type,
+        };
+    }
+
+    pub fn parse(text: []const u8) !BuiltInNoteType {
+        if (std.mem.eql(u8, text, "basic")) return .basic;
+        if (std.mem.eql(u8, text, "reverse") or std.mem.eql(u8, text, "basic-reverse")) return .basic_reverse;
+        if (std.mem.eql(u8, text, "optional-reverse")) return .optional_reverse;
+        if (std.mem.eql(u8, text, "cloze")) return .cloze;
+        if (std.mem.eql(u8, text, "type-answer") or std.mem.eql(u8, text, "type")) return .type_answer;
+        return error.UnknownNoteType;
+    }
+};
+
 pub const FieldDefinition = struct {
     ordinal: FieldOrdinal,
     name: []const u8,
@@ -81,18 +108,15 @@ pub const CreatedNote = struct {
     }
 };
 
-const basic_fields = [_]FieldDefinition{
+const default_css = ".card { font-family: sans-serif; font-size: 20px; text-align: center; }";
+
+const front_back_fields = [_]FieldDefinition{
     .{ .ordinal = 0, .name = "Front" },
     .{ .ordinal = 1, .name = "Back" },
 };
 
 const basic_templates = [_]CardTemplate{
-    .{
-        .ordinal = 0,
-        .name = "Card 1",
-        .front = "{{Front}}",
-        .back = "{{FrontSide}}<hr id=answer>{{Back}}",
-    },
+    .{ .ordinal = 0, .name = "Card 1", .front = "{{Front}}", .back = "{{FrontSide}}<hr id=answer>{{Back}}" },
 };
 
 pub const basic_note_type: NoteTypeDefinition = .{
@@ -100,9 +124,81 @@ pub const basic_note_type: NoteTypeDefinition = .{
     .slug = "basic",
     .name = "Basic",
     .kind = .basic,
-    .css = ".card { font-family: sans-serif; font-size: 20px; text-align: center; }",
-    .fields = &basic_fields,
+    .css = default_css,
+    .fields = &front_back_fields,
     .templates = &basic_templates,
+};
+
+const reverse_templates = [_]CardTemplate{
+    .{ .ordinal = 0, .name = "Forward", .front = "{{Front}}", .back = "{{FrontSide}}<hr id=answer>{{Back}}" },
+    .{ .ordinal = 1, .name = "Reverse", .front = "{{Back}}", .back = "{{FrontSide}}<hr id=answer>{{Front}}" },
+};
+
+pub const basic_reverse_note_type: NoteTypeDefinition = .{
+    .id = 2,
+    .slug = "basic-reverse",
+    .name = "Basic + Reverse",
+    .kind = .basic,
+    .css = default_css,
+    .fields = &front_back_fields,
+    .templates = &reverse_templates,
+};
+
+const optional_reverse_fields = [_]FieldDefinition{
+    .{ .ordinal = 0, .name = "Front" },
+    .{ .ordinal = 1, .name = "Back" },
+    .{ .ordinal = 2, .name = "Add Reverse" },
+};
+
+pub const optional_reverse_note_type: NoteTypeDefinition = .{
+    .id = 3,
+    .slug = "optional-reverse",
+    .name = "Basic + Optional Reverse",
+    .kind = .basic,
+    .css = default_css,
+    .fields = &optional_reverse_fields,
+    .templates = &reverse_templates,
+};
+
+const cloze_fields = [_]FieldDefinition{
+    .{ .ordinal = 0, .name = "Text" },
+    .{ .ordinal = 1, .name = "Extra" },
+};
+
+const cloze_templates = [_]CardTemplate{
+    .{ .ordinal = 0, .name = "Cloze", .front = "{{cloze:Text}}", .back = "{{cloze:Text}}<br>{{Extra}}" },
+};
+
+pub const cloze_note_type: NoteTypeDefinition = .{
+    .id = 4,
+    .slug = "cloze",
+    .name = "Cloze",
+    .kind = .cloze,
+    .css = default_css,
+    .fields = &cloze_fields,
+    .templates = &cloze_templates,
+};
+
+const type_answer_templates = [_]CardTemplate{
+    .{ .ordinal = 0, .name = "Type Answer", .front = "{{Front}}<br>{{type:Back}}", .back = "{{FrontSide}}<hr id=answer>{{Back}}" },
+};
+
+pub const type_answer_note_type: NoteTypeDefinition = .{
+    .id = 5,
+    .slug = "type-answer",
+    .name = "Type in the Answer",
+    .kind = .basic,
+    .css = default_css,
+    .fields = &front_back_fields,
+    .templates = &type_answer_templates,
+};
+
+pub const built_in_note_types = [_]NoteTypeDefinition{
+    basic_note_type,
+    basic_reverse_note_type,
+    optional_reverse_note_type,
+    cloze_note_type,
+    type_answer_note_type,
 };
 
 pub fn generationKey(
@@ -141,11 +237,13 @@ pub fn validateNoteType(definition: NoteTypeDefinition) !void {
     }
 }
 
-test "built in Basic note type is valid" {
-    try validateNoteType(basic_note_type);
-    try std.testing.expectEqual(@as(NoteTypeId, 1), basic_note_type.id);
+test "built in note types are valid and stable" {
+    for (built_in_note_types, 1..) |definition, id| {
+        try validateNoteType(definition);
+        try std.testing.expectEqual(@as(NoteTypeId, id), definition.id);
+    }
     try std.testing.expectEqualStrings("Front", basic_note_type.fields[0].name);
-    try std.testing.expectEqualStrings("Back", basic_note_type.fields[1].name);
+    try std.testing.expectEqualStrings("Text", cloze_note_type.fields[0].name);
 }
 
 test "generation keys are stable by note and template" {

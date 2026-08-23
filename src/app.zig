@@ -2,6 +2,8 @@ const std = @import("std");
 const Io = std.Io;
 const cli = @import("cli.zig");
 const config = @import("config.zig");
+const content = @import("content.zig");
+const card_types = @import("card_types.zig");
 const deck_json = @import("deck_json.zig");
 const nut = @import("nut.zig");
 const fsrs = @import("fsrs/root.zig");
@@ -199,6 +201,17 @@ fn runWithStore(
             defer allocator.free(bytes);
             const result = try nut.importSlice(allocator, store, bytes, now_ms);
             try out.print("Imported deck {d} ({d} cards).\n", .{ result.deck_id, result.card_count });
+        },
+        .note_add => |args| {
+            const kind = try content.BuiltInNoteType.parse(args.note_type);
+            const result = try card_types.create(allocator, store, args.deck_id, kind, args.fields, "[]", now_ms);
+            defer result.deinit(allocator);
+            try out.print("Created note {d} ({d} cards).\n", .{ result.note_id, result.card_ids.len });
+        },
+        .note_edit => |args| {
+            const ids = try card_types.update(allocator, store, args.deck_id, args.note_id, args.fields, "[]", now_ms);
+            defer allocator.free(ids);
+            try out.print("Updated note {d} ({d} cards).\n", .{ args.note_id, ids.len });
         },
         .card_add => |args| {
             const id = try store.createCard(args.deck_id, args.question, args.answer, now_ms);
