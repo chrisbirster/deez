@@ -1,16 +1,20 @@
 const std = @import("std");
 
 const content = @import("content.zig");
+const interaction = @import("interaction.zig");
 const render = @import("render.zig");
 const storage = @import("storage/root.zig");
 const note_type_store = @import("storage/note_type_store.zig");
 const generated_store = @import("storage/generated_card_store.zig");
 
+pub const Generation = union(enum) {
+    template: content.TemplateOrdinal,
+    cloze: u32,
+    occlusion: u32,
+};
+
 pub const CardDraft = struct {
-    generation: union(enum) {
-        template: content.TemplateOrdinal,
-        cloze: u32,
-    },
+    generation: Generation,
     question: []u8,
     answer: []u8,
 
@@ -30,14 +34,7 @@ pub const Generated = struct {
 };
 
 fn builtinForId(id: content.NoteTypeId) !content.BuiltInNoteType {
-    return switch (id) {
-        1 => .basic,
-        2 => .basic_reverse,
-        3 => .optional_reverse,
-        4 => .cloze,
-        5 => .type_answer,
-        else => error.UnsupportedBuiltInNoteType,
-    };
+    return content.BuiltInNoteType.fromId(id) catch return error.UnsupportedBuiltInNoteType;
 }
 
 fn requireFields(kind: content.BuiltInNoteType, values: []const []const u8) !void {
@@ -50,6 +47,24 @@ fn requireFields(kind: content.BuiltInNoteType, values: []const []const u8) !voi
             try content.requireText(values[1]);
         },
         .basic, .basic_reverse, .type_answer => {
+            try content.requireText(values[0]);
+            try content.requireText(values[1]);
+        },
+        .multiple_choice => {
+            try content.requireText(values[0]);
+            try content.requireText(values[1]);
+            try content.requireText(values[2]);
+        },
+        .multiple_select => {
+            try content.requireText(values[0]);
+            try content.requireText(values[1]);
+            try content.requireText(values[2]);
+        },
+        .ordering => {
+            try content.requireText(values[0]);
+            try content.requireText(values[1]);
+        },
+        .image_occlusion => {
             try content.requireText(values[0]);
             try content.requireText(values[1]);
         },
@@ -143,6 +158,20 @@ fn renderedDraft(
     return draft;
 }
 
+fn appendInteractionDraft(
+    allocator: std.mem.Allocator,
+    result: *std.ArrayList(CardDraft),
+    generation: Generation,
+    text: interaction.CardText,
+) !void {
+    errdefer text.deinit(allocator);
+    try result.append(allocator, .{
+        .generation = generation,
+        .question = text.question,
+        .answer = text.answer,
+    });
+}
+
 pub fn drafts(
     allocator: std.mem.Allocator,
     kind: content.BuiltInNoteType,
@@ -207,6 +236,26 @@ pub fn drafts(
                 );
             }
         },
+        .multiple_choice => {
+            const text = try interaction.multipleChoice(allocator, values[0], values[1], values[2], values[3]);
+            try appendInteractionDraft(allocator, &result, .{ .template = 0 }, text);
+        },
+        .multiple_select => {
+            const text = try interaction.multipleSelect(allocator, values[0], values[1], values[2], values[3]);
+            try appendInteractionDraft(allocator, &result, .{ .template = 0 }, text);
+        },
+        .ordering => {
+            const text = try interaction.ordering(allocator, values[0], values[1], values[2]);
+            try appendInteractionDraft(allocator, &result, .{ .template = 0 }, text);
+        },
+        .image_occlusion => {
+            const ids = try interaction.occlusionIds(allocator, values[0], values[1]);
+            defer allocator.free(ids);
+            for (ids) |id| {
+                const text = try interaction.imageOcclusion(allocator, values[0], values[1], values[2], id);
+                try appendInteractionDraft(allocator, &result, .{ .occlusion = id }, text);
+            }
+        },
     }
 
     return result.toOwnedSlice(allocator);
@@ -232,6 +281,7 @@ fn syncCards(
         const key = switch (draft.generation) {
             .template => |ordinal| try content.generationKey(allocator, note_id, ordinal),
             .cloze => |ordinal| try content.clozeGenerationKey(allocator, note_id, ordinal),
+            .occlusion => |id| try content.occlusionGenerationKey(allocator, note_id, id),
         };
         defer allocator.free(key);
         if (try generated_store.cardIdForKey(store, key)) |card_id| {
@@ -242,7 +292,7 @@ fn syncCards(
             errdefer store.deleteCard(card_id) catch {};
             const template_ordinal: content.TemplateOrdinal = switch (draft.generation) {
                 .template => |ordinal| ordinal,
-                .cloze => 0,
+                .cloze, .occlusion => 0,
             };
             try generated_store.link(store, card_id, note_id, template_ordinal, key);
             ids[index] = card_id;
@@ -337,4 +387,56 @@ test "cloze generates one card per distinct cloze ordinal" {
     try std.testing.expectEqual(@as(usize, 2), generated.len);
     try std.testing.expect(std.mem.indexOf(u8, generated[0].question, "[...]") != null);
     try std.testing.expect(std.mem.indexOf(u8, generated[0].answer, "France") != null);
+}
+
+test "multiple choice and multiple select generate one logical card" {
+    const choices = "[{\"id\":\"stack\",\"text\":\"Stack\"},{\"id\":\"queue\",\"text\":\"Queue\"},{\"id\":\"hash\",\"text\":\"Hash table\"}]";
+    const mc = [_][]const u8{ "Average O(1) lookup?", choices, "hash", "Uses hashing." };
+    const generated_mc = try drafts(std.testing.allocator, .multiple_choice, &mc);
+    defer {
+        for (generated_mc) |draft| draft.deinit(std.testing.allocator);
+        std.testing.allocator.free(generated_mc);
+    }
+    try std.testing.expectEqual(@as(usize, 1), generated_mc.len);
+    try std.testing.expect(std.mem.indexOf(u8, generated_mc[0].answer, "Hash table") != null);
+
+    const ms = [_][]const u8{ "Stack O(1) operations?", choices, "[\"stack\",\"queue\"]", "Example only." };
+    const generated_ms = try drafts(std.testing.allocator, .multiple_select, &ms);
+    defer {
+        for (generated_ms) |draft| draft.deinit(std.testing.allocator);
+        std.testing.allocator.free(generated_ms);
+    }
+    try std.testing.expectEqual(@as(usize, 1), generated_ms.len);
+}
+
+test "ordering generates a scrambled prompt and canonical answer" {
+    const items = "[{\"id\":\"a\",\"text\":\"First\"},{\"id\":\"b\",\"text\":\"Second\"},{\"id\":\"c\",\"text\":\"Third\"}]";
+    const values = [_][]const u8{ "Put these in order", items, "" };
+    const generated = try drafts(std.testing.allocator, .ordering, &values);
+    defer {
+        for (generated) |draft| draft.deinit(std.testing.allocator);
+        std.testing.allocator.free(generated);
+    }
+    try std.testing.expectEqual(@as(usize, 1), generated.len);
+    try std.testing.expect(std.mem.indexOf(u8, generated[0].answer, "1. First") != null);
+}
+
+test "image occlusion identity follows mask id across reordering" {
+    var db = try storage.Db.open(":memory:");
+    defer db.close();
+    try db.migrate();
+    var store: storage.Store = .{ .sqlite = &db };
+    const deck_id = try store.createDeck("occlusion", 0);
+    const image = "deez-media://sha256:0000000000000000000000000000000000000000000000000000000000000000";
+    const masks_a = "[{\"id\":2,\"x\":0.5,\"y\":0.1,\"width\":0.2,\"height\":0.2,\"answer\":\"right\"},{\"id\":1,\"x\":0.1,\"y\":0.1,\"width\":0.2,\"height\":0.2,\"answer\":\"left\"}]";
+    const fields_a = [_][]const u8{ image, masks_a, "tree" };
+    const created = try create(std.testing.allocator, &store, deck_id, .image_occlusion, &fields_a, "[]", 0);
+    defer created.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 2), created.card_ids.len);
+
+    const masks_b = "[{\"id\":1,\"x\":0.1,\"y\":0.1,\"width\":0.2,\"height\":0.2,\"answer\":\"left node\"},{\"id\":2,\"x\":0.5,\"y\":0.1,\"width\":0.2,\"height\":0.2,\"answer\":\"right node\"}]";
+    const fields_b = [_][]const u8{ image, masks_b, "tree" };
+    const updated = try update(std.testing.allocator, &store, deck_id, created.note_id, &fields_b, "[]", 1);
+    defer std.testing.allocator.free(updated);
+    try std.testing.expectEqualSlices(u64, created.card_ids, updated);
 }
