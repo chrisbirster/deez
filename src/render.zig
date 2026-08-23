@@ -268,9 +268,8 @@ pub fn plainText(allocator: std.mem.Allocator, html: []const u8) ![]u8 {
     var out: std.Io.Writer.Allocating = .init(allocator);
     errdefer out.deinit();
     var index: usize = 0;
-    var in_tag = false;
     while (index < html.len) {
-        if (!in_tag and html[index] == '<') {
+        if (html[index] == '<') {
             const close = std.mem.indexOfScalarPos(u8, html, index, '>') orelse {
                 try out.writer.writeByte('<');
                 index += 1;
@@ -283,7 +282,7 @@ pub fn plainText(allocator: std.mem.Allocator, html: []const u8) ![]u8 {
             index = close + 1;
             continue;
         }
-        if (!in_tag and html[index] == '&') {
+        if (html[index] == '&') {
             if (std.mem.indexOfScalarPos(u8, html, index + 1, ';')) |semi| {
                 if (try writeEntity(html[index + 1 .. semi], &out.writer)) {
                     index = semi + 1;
@@ -291,7 +290,7 @@ pub fn plainText(allocator: std.mem.Allocator, html: []const u8) ![]u8 {
                 }
             }
         }
-        if (!in_tag) try out.writer.writeByte(html[index]);
+        try out.writer.writeByte(html[index]);
         index += 1;
     }
     const raw = out.written();
