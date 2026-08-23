@@ -16,14 +16,8 @@ fn parseId(text: []const u8) !u64 {
 }
 
 fn typeLabel(note_type_id: content.NoteTypeId) []const u8 {
-    return switch (note_type_id) {
-        1 => "basic",
-        2 => "basic-reverse",
-        3 => "optional-reverse",
-        4 => "cloze",
-        5 => "type-answer",
-        else => "custom",
-    };
+    const kind = content.BuiltInNoteType.fromId(note_type_id) catch return "custom";
+    return kind.definition().slug;
 }
 
 fn contains(ids: []const content.NoteId, id: content.NoteId) bool {
