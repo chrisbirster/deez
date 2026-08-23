@@ -9,6 +9,7 @@ pub const portable_content = @import("portable_content.zig");
 pub const render = @import("render.zig");
 pub const media = @import("media.zig");
 pub const sack = @import("sack.zig");
+pub const rich_cli = @import("rich_cli.zig");
 pub const review = @import("review.zig");
 pub const fsrs = @import("fsrs/root.zig");
 pub const storage = @import("storage/root.zig");
