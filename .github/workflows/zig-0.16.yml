@@ -14,5 +14,5 @@ jobs:
           version: 0.16.0
       - name: Install SQLite headers
         run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev
-      - name: Test Deez against pinned Bongo 0.4.0 package
+      - name: Test Deez against pinned Bongo 0.6.0 package
         run: zig build test
