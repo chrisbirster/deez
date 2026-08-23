@@ -1,17 +1,17 @@
 class Deez < Formula
   desc "Terminal-first spaced-repetition system using FSRS"
   homepage "https://github.com/chrisbirster/deez"
-  version "0.1.1"
+  version "0.2.0-rc.2"
   license "MIT"
 
   on_arm do
-    url "https://github.com/chrisbirster/deez/releases/download/v0.1.1/deez-aarch64-apple-darwin.tar.gz"
-    sha256 "2184386e4fc9bbb561b44092e2a16684d4f83c505a060316926e78c014384f29"
+    url "https://github.com/chrisbirster/deez/releases/download/v0.2.0-rc.2/deez-aarch64-apple-darwin.tar.gz"
+    sha256 "4998ffd6d70bb3a3e289a23e51c51ad6c296e16ea4445405e267d9253efefe54"
   end
 
   on_intel do
-    url "https://github.com/chrisbirster/deez/releases/download/v0.1.1/deez-x86_64-apple-darwin.tar.gz"
-    sha256 "b068166483159fe8f84490c0df44f398304cf1ac906d5b6ddd4ca2ddc9af4fa9"
+    url "https://github.com/chrisbirster/deez/releases/download/v0.2.0-rc.2/deez-x86_64-apple-darwin.tar.gz"
+    sha256 "74a3b014169e8dd10d177455c3860f00f2f79eb738cd4824038d6c810bda4f72"
   end
 
   depends_on :macos
