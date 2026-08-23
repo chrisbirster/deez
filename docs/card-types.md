@@ -76,7 +76,59 @@ Fields:
 - `Front`
 - `Back`
 
-The built-in template contains `{{type:Back}}`. RC2 persists and generates the card identity; interactive typed-answer rendering is part of the rendering-engine milestone.
+The built-in template contains `{{type:Back}}`. The renderer exposes typed-answer metadata while terminal study retains a self-grade fallback.
+
+### Multiple Choice
+
+Fields:
+
+- `Prompt`
+- `Choices`
+- `Correct`
+- `Explanation`
+
+Generates one card. `Choices` is JSON containing stable choice IDs and display text; `Correct` is the stable choice ID rather than a letter or array position. This lets graphical clients randomize choices without changing the semantic answer.
+
+### Multiple Select
+
+Fields:
+
+- `Prompt`
+- `Choices`
+- `Correct`
+- `Explanation`
+
+Generates one card. `Correct` is a JSON array of stable choice IDs. All IDs are validated against `Choices`.
+
+### Ordering
+
+Fields:
+
+- `Prompt`
+- `Items`
+- `Explanation`
+
+Generates one card. `Items` is a JSON array in canonical correct order, with stable item IDs. Presentation order can be shuffled independently of the stored answer order.
+
+### Image Occlusion
+
+Fields:
+
+- `Image`
+- `Masks`
+- `Extra`
+
+`Image` is a `deez-media://sha256:<hash>` reference. `Masks` is JSON containing normalized rectangles, stable positive mask IDs, answers, and optional per-mask prompts.
+
+Each mask generates one card with identity:
+
+```text
+note:<note-id>:occlusion:<mask-id>
+```
+
+Reordering masks does not change card identities, so review history stays attached to the same semantic mask.
+
+See `docs/interactions.md` for exact JSON schemas and CLI examples for these four interactive note types.
 
 ## Listing and editing notes
 
@@ -85,7 +137,7 @@ deez notes <deck-id>
 deez note edit <deck-id> <note-id> <fields...>
 ```
 
-`deez notes` lists logical notes rather than duplicating one row for every reverse/cloze card. Legacy v0.1.x question/answer cards are shown as `legacy-basic` without mutating them merely to list content.
+`deez notes` lists logical notes rather than duplicating one row for every reverse/cloze/image-occlusion card. Legacy v0.1.x question/answer cards are shown as `legacy-basic` without mutating them merely to list content.
 
 Editing a note regenerates content using stable generation keys. An unchanged generation identity keeps the same card ID, so its immutable review history remains attached even when field text changes.
 
@@ -93,7 +145,7 @@ Deez does not delete reviewed cards merely because a generated identity becomes 
 
 ## Shareable JSON v2
 
-Exports now represent logical notes instead of flattened generated cards:
+Exports represent logical notes instead of flattened generated cards:
 
 ```json
 {
@@ -112,7 +164,7 @@ Exports now represent logical notes instead of flattened generated cards:
 }
 ```
 
-This prevents a reverse note from becoming two unrelated Basic cards after sharing it.
+This prevents a reverse note from becoming two unrelated Basic cards after sharing it. Structured interactive fields are preserved as note fields as well.
 
 Version 1 JSON deck files remain importable.
 
