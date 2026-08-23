@@ -415,3 +415,89 @@ test "unsafe script and event handlers are rejected" {
     try std.testing.expectError(error.UnsafeTemplateMarkup, validateSafeMarkup("<img src=x onerror=alert(1)>"));
     try std.testing.expectError(error.UnsafeTemplateMarkup, validateSafeMarkup("<a href=javascript:alert(1)>x</a>"));
 }
+
+test "golden built-in basic plain-text rendering" {
+    const fields = [_]content.FieldValue{
+        .{ .ordinal = 0, .value = "<b>Capital of France?</b>" },
+        .{ .ordinal = 1, .value = "Paris" },
+    };
+
+    const rendered = try renderCard(
+        std.testing.allocator,
+        content.basic_note_type,
+        &fields,
+        0,
+        .{ .mode = .plain_text },
+    );
+    defer rendered.deinit(std.testing.allocator);
+
+    try std.testing.expectEqualStrings("Capital of France?", rendered.front);
+    try std.testing.expectEqualStrings("Capital of France?\nParis", rendered.back);
+}
+
+test "golden built-in reverse plain-text rendering" {
+    const fields = [_]content.FieldValue{
+        .{ .ordinal = 0, .value = "Capital of France?" },
+        .{ .ordinal = 1, .value = "Paris" },
+    };
+
+    const rendered = try renderCard(
+        std.testing.allocator,
+        content.basic_reverse_note_type,
+        &fields,
+        1,
+        .{ .mode = .plain_text },
+    );
+    defer rendered.deinit(std.testing.allocator);
+
+    try std.testing.expectEqualStrings("Paris", rendered.front);
+    try std.testing.expectEqualStrings("Paris\nCapital of France?", rendered.back);
+}
+
+test "golden built-in cloze plain-text rendering" {
+    const fields = [_]content.FieldValue{
+        .{ .ordinal = 0, .value = "Paris is the capital of {{c1::France}}." },
+        .{ .ordinal = 1, .value = "Europe" },
+    };
+
+    const rendered = try renderCard(
+        std.testing.allocator,
+        content.cloze_note_type,
+        &fields,
+        0,
+        .{
+            .mode = .plain_text,
+            .cloze_ordinal = 1,
+        },
+    );
+    defer rendered.deinit(std.testing.allocator);
+
+    try std.testing.expectEqualStrings(
+        "Paris is the capital of [...].",
+        rendered.front,
+    );
+    try std.testing.expectEqualStrings(
+        "Paris is the capital of France.\nEurope",
+        rendered.back,
+    );
+}
+
+test "golden type-answer exposes typed answer metadata" {
+    const fields = [_]content.FieldValue{
+        .{ .ordinal = 0, .value = "Capital of France?" },
+        .{ .ordinal = 1, .value = "Paris" },
+    };
+
+    const rendered = try renderCard(
+        std.testing.allocator,
+        content.type_answer_note_type,
+        &fields,
+        0,
+        .{ .mode = .plain_text },
+    );
+    defer rendered.deinit(std.testing.allocator);
+
+    try std.testing.expectEqualStrings("Capital of France?", rendered.front);
+    try std.testing.expectEqualStrings("Paris", rendered.typed_answer.?);
+    try std.testing.expectEqualStrings("Capital of France?\nParis", rendered.back);
+}

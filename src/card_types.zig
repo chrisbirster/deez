@@ -1,6 +1,7 @@
 const std = @import("std");
 
 const content = @import("content.zig");
+const render = @import("render.zig");
 const storage = @import("storage/root.zig");
 const note_type_store = @import("storage/note_type_store.zig");
 const generated_store = @import("storage/generated_card_store.zig");
@@ -53,19 +54,6 @@ fn requireFields(kind: content.BuiltInNoteType, values: []const []const u8) !voi
             try content.requireText(values[1]);
         },
     }
-}
-
-fn simpleDraft(
-    allocator: std.mem.Allocator,
-    ordinal: content.TemplateOrdinal,
-    question: []const u8,
-    answer: []const u8,
-) !CardDraft {
-    return .{
-        .generation = .{ .template = ordinal },
-        .question = try allocator.dupe(u8, question),
-        .answer = try allocator.dupe(u8, answer),
-    };
 }
 
 const Cloze = struct {
@@ -121,31 +109,38 @@ fn collectClozeOrdinals(allocator: std.mem.Allocator, source: []const u8) ![]u32
     return ordinals.toOwnedSlice(allocator);
 }
 
-fn renderCloze(
+fn renderedDraft(
     allocator: std.mem.Allocator,
-    source: []const u8,
-    target: u32,
-    reveal_target: bool,
-) ![]u8 {
-    var out: std.Io.Writer.Allocating = .init(allocator);
-    errdefer out.deinit();
-    var index: usize = 0;
-    while (index < source.len) {
-        if (try parseClozeAt(source, index)) |cloze| {
-            if (cloze.ordinal == target and !reveal_target) {
-                if (cloze.hint) |hint| {
-                    try out.writer.print("[{s}]", .{hint});
-                } else try out.writer.writeAll("[...]");
-            } else {
-                try out.writer.writeAll(cloze.text);
-            }
-            index = cloze.end;
-        } else {
-            try out.writer.writeByte(source[index]);
-            index += 1;
-        }
+    definition: content.NoteTypeDefinition,
+    fields: []const content.FieldValue,
+    template_ordinal: content.TemplateOrdinal,
+    cloze_ordinal: ?u32,
+) !CardDraft {
+    const rendered = try render.renderCard(
+        allocator,
+        definition,
+        fields,
+        template_ordinal,
+        .{
+            .mode = .plain_text,
+            .cloze_ordinal = cloze_ordinal,
+        },
+    );
+
+    allocator.free(rendered.css);
+    if (rendered.typed_answer) |typed_answer| allocator.free(typed_answer);
+
+    var draft: CardDraft = .{
+        .generation = .{ .template = template_ordinal },
+        .question = rendered.front,
+        .answer = rendered.back,
+    };
+
+    if (cloze_ordinal) |ordinal| {
+        draft.generation = .{ .cloze = ordinal };
     }
-    return out.toOwnedSlice();
+
+    return draft;
 }
 
 pub fn drafts(
@@ -154,46 +149,66 @@ pub fn drafts(
     values: []const []const u8,
 ) ![]CardDraft {
     try requireFields(kind, values);
+
+    const definition = kind.definition();
+    const fields = try fieldValues(allocator, values);
+    defer allocator.free(fields);
+
     var result: std.ArrayList(CardDraft) = .empty;
     errdefer {
         for (result.items) |draft| draft.deinit(allocator);
         result.deinit(allocator);
     }
+
     switch (kind) {
-        .basic, .type_answer => try result.append(allocator, try simpleDraft(allocator, 0, values[0], values[1])),
+        .basic, .type_answer => {
+            try result.append(
+                allocator,
+                try renderedDraft(allocator, definition, fields, 0, null),
+            );
+        },
         .basic_reverse => {
-            try result.append(allocator, try simpleDraft(allocator, 0, values[0], values[1]));
-            try result.append(allocator, try simpleDraft(allocator, 1, values[1], values[0]));
+            try result.append(
+                allocator,
+                try renderedDraft(allocator, definition, fields, 0, null),
+            );
+            try result.append(
+                allocator,
+                try renderedDraft(allocator, definition, fields, 1, null),
+            );
         },
         .optional_reverse => {
-            try result.append(allocator, try simpleDraft(allocator, 0, values[0], values[1]));
+            try result.append(
+                allocator,
+                try renderedDraft(allocator, definition, fields, 0, null),
+            );
+
             if (std.mem.trim(u8, values[2], " \t\r\n").len != 0) {
-                try result.append(allocator, try simpleDraft(allocator, 1, values[1], values[0]));
+                try result.append(
+                    allocator,
+                    try renderedDraft(allocator, definition, fields, 1, null),
+                );
             }
         },
         .cloze => {
             const ordinals = try collectClozeOrdinals(allocator, values[0]);
             defer allocator.free(ordinals);
+
             for (ordinals) |ordinal| {
-                const question = try renderCloze(allocator, values[0], ordinal, false);
-                errdefer allocator.free(question);
-                const revealed = try renderCloze(allocator, values[0], ordinal, true);
-                errdefer allocator.free(revealed);
-                const answer = if (values[1].len == 0)
-                    revealed
-                else blk: {
-                    const combined = try std.fmt.allocPrint(allocator, "{s}\n{s}", .{ revealed, values[1] });
-                    allocator.free(revealed);
-                    break :blk combined;
-                };
-                try result.append(allocator, .{
-                    .generation = .{ .cloze = ordinal },
-                    .question = question,
-                    .answer = answer,
-                });
+                try result.append(
+                    allocator,
+                    try renderedDraft(
+                        allocator,
+                        definition,
+                        fields,
+                        0,
+                        ordinal,
+                    ),
+                );
             }
         },
     }
+
     return result.toOwnedSlice(allocator);
 }
 
