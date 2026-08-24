@@ -201,4 +201,4 @@ deez backup --help
 deez restore --help
 ```
 
-The established command parser lives in `src/cli.zig`. Backup/restore is routed through the dedicated `src/backup_cli.zig` entrypoint because archives stream through stdin/stdout rather than the normal formatted application command surface. Storage and scheduling behavior remain behind domain APIs rather than in either parser.
+The declarative command tree and parser live in `src/thrawn_cli.zig` and use Thrawn for command resolution, options, and argument validation. `src/cli.zig` retains the Deez domain command union and stable help contract consumed by `src/app.zig`. Backup/restore keeps its dedicated streaming executor because archives flow through stdin/stdout, while Thrawn validates and routes those commands before execution. Storage and scheduling behavior remain behind Deez domain APIs rather than in the CLI framework.
