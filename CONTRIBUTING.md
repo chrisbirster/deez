@@ -15,7 +15,11 @@ A change is not acceptable if it requires rewriting historical reviews just to f
 - `src/study.zig` — study/replay/session orchestration
 - `src/interchange_mongodb.zig` — Mongo logical backup/restore
 - `src/import/` — external-history importers
-- `src/cli.zig` / `src/app.zig` — terminal interface
+- `src/thrawn_cli.zig` — declarative Thrawn command tree, CLI resolution, options, and validation
+- `src/cli.zig` — domain command union and stable help text consumed by the application layer
+- `src/app.zig` — execution of parsed domain commands against storage/scheduler APIs
+
+Thrawn owns generic CLI mechanics only. Deez owns its command semantics, storage selection, scheduler behavior, streaming archive behavior, and exit-code policy. Do not move Deez-specific domain behavior into Thrawn.
 
 Storage APIs are operation-oriented. Do not add a fake generic SQL/Mongo query layer merely to make the backends look identical.
 
