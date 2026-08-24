@@ -22,6 +22,7 @@ const version = std.mem.trim(u8, @embedFile("../VERSION"), " \t\r\n");
 
 const App = struct {
     allocator: std.mem.Allocator,
+    io: Io,
     store: *storage.Store,
 };
 
@@ -77,7 +78,7 @@ fn serveWithStore(
     store: *storage.Store,
     options: Options,
 ) !void {
-    var app: App = .{ .allocator = allocator, .store = store };
+    var app: App = .{ .allocator = allocator, .io = io, .store = store };
     var server = try httpz.Server(*App).init(io, allocator, .{
         .address = .localhost(options.port),
         .workers = .{
@@ -110,6 +111,12 @@ fn serveWithStore(
     router.get("/api/v1/health", health, .{});
     router.get("/api/v1/version", versionInfo, .{});
     router.get("/api/v1/capabilities", capabilities, .{});
+    router.get("/api/v1/decks", listDecks, .{});
+    router.get("/api/v1/decks/:deck_id", getDeck, .{});
+    router.get("/api/v1/decks/:deck_id/notes", listNotes, .{});
+    router.get("/api/v1/notes/:note_id", getNote, .{});
+    router.get("/api/v1/decks/:deck_id/cards", listCards, .{});
+    router.get("/api/v1/cards/:card_id", getCard, .{});
 
     var stdout_buffer: [256]u8 = undefined;
     var stdout_file_writer: Io.File.Writer = .init(.stdout(), io, &stdout_buffer);
@@ -118,6 +125,30 @@ fn serveWithStore(
     try out.flush();
 
     try server.listen();
+}
+
+fn nowMs(io: Io) i64 {
+    return Io.Timestamp.now(io, .real).toSeconds() * 1_000;
+}
+
+fn writeError(
+    res: *httpz.Response,
+    status: u16,
+    code: []const u8,
+    message: []const u8,
+) !void {
+    res.status = status;
+    try res.json(.{
+        .error = .{
+            .code = code,
+            .message = message,
+        },
+    }, .{});
+}
+
+fn pathId(req: *httpz.Request, name: []const u8) !u64 {
+    const raw = req.param(name) orelse return error.InvalidId;
+    return std.fmt.parseInt(u64, raw, 10) catch return error.InvalidId;
 }
 
 fn health(app: *App, req: *httpz.Request, res: *httpz.Response) !void {
@@ -154,6 +185,104 @@ fn capabilities(app: *App, req: *httpz.Request, res: *httpz.Response) !void {
         .note_types = note_types[0..],
         .interactions = interactions[0..],
     }, .{});
+}
+
+fn listDecks(app: *App, req: *httpz.Request, res: *httpz.Response) !void {
+    _ = req;
+    const decks = try app.store.decks(app.allocator, nowMs(app.io));
+    defer {
+        for (decks) |deck| deck.deinit(app.allocator);
+        app.allocator.free(decks);
+    }
+    try res.json(.{ .decks = decks }, .{});
+}
+
+fn getDeck(app: *App, req: *httpz.Request, res: *httpz.Response) !void {
+    const deck_id = pathId(req, "deck_id") catch
+        return writeError(res, 400, "invalid_id", "deck_id must be an unsigned integer");
+    const deck = (try app.store.getDeck(app.allocator, deck_id)) orelse
+        return writeError(res, 404, "deck_not_found", "deck does not exist");
+    defer deck.deinit(app.allocator);
+
+    try res.json(.{
+        .deck = .{
+            .id = deck.id,
+            .name = deck.name,
+        },
+    }, .{});
+}
+
+fn listCards(app: *App, req: *httpz.Request, res: *httpz.Response) !void {
+    const deck_id = pathId(req, "deck_id") catch
+        return writeError(res, 400, "invalid_id", "deck_id must be an unsigned integer");
+    const deck = (try app.store.getDeck(app.allocator, deck_id)) orelse
+        return writeError(res, 404, "deck_not_found", "deck does not exist");
+    defer deck.deinit(app.allocator);
+
+    const cards = try app.store.cards(app.allocator, deck_id);
+    defer {
+        for (cards) |card| card.deinit(app.allocator);
+        app.allocator.free(cards);
+    }
+    try res.json(.{ .cards = cards }, .{});
+}
+
+fn getCard(app: *App, req: *httpz.Request, res: *httpz.Response) !void {
+    const card_id = pathId(req, "card_id") catch
+        return writeError(res, 400, "invalid_id", "card_id must be an unsigned integer");
+    const card = (try app.store.getCard(app.allocator, card_id)) orelse
+        return writeError(res, 404, "card_not_found", "card does not exist");
+    defer card.deinit(app.allocator);
+    try res.json(.{ .card = card }, .{});
+}
+
+fn hasNote(notes: []const content.OwnedNote, note_id: content.NoteId) bool {
+    for (notes) |note| {
+        if (note.id == note_id) return true;
+    }
+    return false;
+}
+
+fn listNotes(app: *App, req: *httpz.Request, res: *httpz.Response) !void {
+    const deck_id = pathId(req, "deck_id") catch
+        return writeError(res, 400, "invalid_id", "deck_id must be an unsigned integer");
+    const deck = (try app.store.getDeck(app.allocator, deck_id)) orelse
+        return writeError(res, 404, "deck_not_found", "deck does not exist");
+    defer deck.deinit(app.allocator);
+
+    const cards = try app.store.cards(app.allocator, deck_id);
+    defer {
+        for (cards) |card| card.deinit(app.allocator);
+        app.allocator.free(cards);
+    }
+
+    const content_store = storage.ContentStore.init(app.store);
+    var notes: std.ArrayList(content.OwnedNote) = .empty;
+    defer {
+        for (notes.items) |note| note.deinit(app.allocator);
+        notes.deinit(app.allocator);
+    }
+
+    for (cards) |card| {
+        const source = (try content_store.cardSource(app.allocator, card.id)) orelse continue;
+        defer source.deinit(app.allocator);
+        if (hasNote(notes.items, source.note_id)) continue;
+        const note = (try content_store.getNote(app.allocator, source.note_id)) orelse continue;
+        errdefer note.deinit(app.allocator);
+        try notes.append(app.allocator, note);
+    }
+
+    try res.json(.{ .notes = notes.items }, .{});
+}
+
+fn getNote(app: *App, req: *httpz.Request, res: *httpz.Response) !void {
+    const note_id = pathId(req, "note_id") catch
+        return writeError(res, 400, "invalid_id", "note_id must be an unsigned integer");
+    const content_store = storage.ContentStore.init(app.store);
+    const note = (try content_store.getNote(app.allocator, note_id)) orelse
+        return writeError(res, 404, "note_not_found", "note does not exist");
+    defer note.deinit(app.allocator);
+    try res.json(.{ .note = note }, .{});
 }
 
 test "serve options are loopback-port only" {
