@@ -46,13 +46,16 @@ test "cards and card add remain compatible" {
         "What is BSON?",
         "Binary JSON",
     };
-    const added = try parse(&add_args);
+    var added = try parse(&add_args);
+    defer added.deinit(std.testing.allocator);
     try std.testing.expectEqual(@as(u64, 3), added.core.card_add.deck_id);
     try std.testing.expectEqualStrings("What is BSON?", added.core.card_add.question);
     try std.testing.expectEqualStrings("Binary JSON", added.core.card_add.answer);
+    try std.testing.expect(added.core.card_add.question.ptr != add_args[4].ptr);
+    try std.testing.expect(added.core.card_add.answer.ptr != add_args[5].ptr);
 }
 
-test "note add and edit retain variadic fields" {
+test "note add and edit own variadic fields" {
     const add_args = [_][]const u8{
         "deez",
         "note",
@@ -62,10 +65,16 @@ test "note add and edit retain variadic fields" {
         "France",
         "Paris",
     };
-    const added = try parse(&add_args);
+    var added = try parse(&add_args);
+    defer added.deinit(std.testing.allocator);
     try std.testing.expectEqual(@as(u64, 3), added.core.note_add.deck_id);
     try std.testing.expectEqualStrings("reverse", added.core.note_add.note_type);
     try std.testing.expectEqual(@as(usize, 2), added.core.note_add.fields.len);
+    try std.testing.expect(added.core.note_add.note_type.ptr != add_args[4].ptr);
+    try std.testing.expect(added.core.note_add.fields.ptr != add_args[5..].ptr);
+    try std.testing.expect(added.core.note_add.fields[0].ptr != add_args[5].ptr);
+    try std.testing.expectEqualStrings("France", added.core.note_add.fields[0]);
+    try std.testing.expectEqualStrings("Paris", added.core.note_add.fields[1]);
 
     const edit_args = [_][]const u8{
         "deez",
@@ -76,9 +85,12 @@ test "note add and edit retain variadic fields" {
         "France",
         "Paris",
     };
-    const edited = try parse(&edit_args);
+    var edited = try parse(&edit_args);
+    defer edited.deinit(std.testing.allocator);
     try std.testing.expectEqual(@as(u64, 9), edited.core.note_edit.note_id);
     try std.testing.expectEqual(@as(usize, 2), edited.core.note_edit.fields.len);
+    try std.testing.expect(edited.core.note_edit.fields.ptr != edit_args[5..].ptr);
+    try std.testing.expect(edited.core.note_edit.fields[0].ptr != edit_args[5].ptr);
 }
 
 test "nuts remains an alias in behavior" {
@@ -93,16 +105,20 @@ test "nut and deck interchange commands remain compatible" {
     try std.testing.expectEqual(@as(u64, 7), nut_export.core.nut_export.deck_id);
 
     const nut_import_args = [_][]const u8{ "deez", "nut", "import", "zig.nut" };
-    const nut_import = try parse(&nut_import_args);
+    var nut_import = try parse(&nut_import_args);
+    defer nut_import.deinit(std.testing.allocator);
     try std.testing.expectEqualStrings("zig.nut", nut_import.core.nut_import.path);
+    try std.testing.expect(nut_import.core.nut_import.path.ptr != nut_import_args[3].ptr);
 
     const deck_export_args = [_][]const u8{ "deez", "deck", "export", "7" };
     const deck_export = try parse(&deck_export_args);
     try std.testing.expectEqual(@as(u64, 7), deck_export.core.deck_export.deck_id);
 
     const deck_import_args = [_][]const u8{ "deez", "deck", "import", "zig.json" };
-    const deck_import = try parse(&deck_import_args);
+    var deck_import = try parse(&deck_import_args);
+    defer deck_import.deinit(std.testing.allocator);
     try std.testing.expectEqualStrings("zig.json", deck_import.core.deck_import.path);
+    try std.testing.expect(deck_import.core.deck_import.path.ptr != deck_import_args[3].ptr);
 }
 
 test "stats and inspect retain json option" {
