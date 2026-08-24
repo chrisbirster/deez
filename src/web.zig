@@ -5,6 +5,7 @@ const browser = @import("browser.zig");
 const content = @import("content.zig");
 const storage = @import("storage/root.zig");
 const web_assets = @import("web_assets.zig");
+const web_cards = @import("web_cards.zig");
 const web_notes = @import("web_notes.zig");
 
 const Io = std.Io;
@@ -158,10 +159,12 @@ pub fn run(init: std.process.Init, store: *storage.Store, options: Options) !voi
     router.get("/api/v1/decks/:id", deck, .{});
     router.get("/api/v1/decks/:id/notes", deckNotes, .{});
     router.post("/api/v1/decks/:id/notes", createNote, .{});
+    router.get("/api/v1/decks/:id/cards", deckCards, .{});
     router.get("/api/v1/notes/:id", note, .{});
     router.patch("/api/v1/notes/:id", updateNote, .{});
     router.delete("/api/v1/notes/:id", deleteNote, .{});
     router.post("/api/v1/notes/preview", previewNote, .{});
+    router.get("/api/v1/cards/:id", card, .{});
 
     if (options.web_root) |root| {
         std.debug.print("Deez Web listening on http://127.0.0.1:{d}/ (assets: {s})\n", .{ options.port, root });
@@ -288,6 +291,10 @@ fn deckNotes(self: *Handler, req: *httpz.Request, res: *httpz.Response) !void {
     try res.json(result, .{});
 }
 
+fn deckCards(self: *Handler, req: *httpz.Request, res: *httpz.Response) !void {
+    try web_cards.deckCards(self.store, req, res);
+}
+
 fn note(self: *Handler, req: *httpz.Request, res: *httpz.Response) !void {
     const note_id = parseRouteId(req, res, "id") orelse return;
     const owned = (try storage.ContentStore.init(self.store).getNote(res.arena, note_id)) orelse {
@@ -333,6 +340,10 @@ fn deleteNote(self: *Handler, req: *httpz.Request, res: *httpz.Response) !void {
 
 fn previewNote(_: *Handler, req: *httpz.Request, res: *httpz.Response) !void {
     try web_notes.previewNote(req, res);
+}
+
+fn card(self: *Handler, req: *httpz.Request, res: *httpz.Response) !void {
+    try web_cards.card(self.store, req, res);
 }
 
 fn parseRouteId(req: *httpz.Request, res: *httpz.Response, name: []const u8) ?u64 {
