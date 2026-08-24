@@ -40,7 +40,9 @@ fn validateMime(value: []const u8) !void {
 fn setImmutableHeaders(res: *httpz.Response, hash: []const u8, mime: []const u8) ![]const u8 {
     try validateMime(mime);
     const etag = try std.fmt.allocPrint(res.arena, "\"{s}\"", .{hash});
-    res.header("Content-Type", mime);
+    // httpz writes header slices after the action returns. Media metadata is
+    // deliberately short-lived, so copy its MIME value into the response arena.
+    try res.headerOpts("Content-Type", mime, .{ .dupe_value = true });
     res.header("Cache-Control", "public, max-age=31536000, immutable");
     res.header("ETag", etag);
     res.header("X-Content-Type-Options", "nosniff");
@@ -66,14 +68,18 @@ pub fn serve(
         return;
     }
 
-    const metadata = media.loadMetadata(res.arena, io, media_root, hash) catch |err| {
+    // std.json.parseFromSlice owns a temporary arena internally. Keep that
+    // allocation graph independent from httpz's request/response arena so its
+    // deinit cannot invalidate metadata slices that are still in use here.
+    const metadata_allocator = std.heap.page_allocator;
+    const metadata = media.loadMetadata(metadata_allocator, io, media_root, hash) catch |err| {
         if (isMissing(err)) {
             try jsonError(res, 404, "media_not_found", "Media not found");
             return;
         }
         return err;
     };
-    defer metadata.deinit(res.arena);
+    defer metadata.deinit(metadata_allocator);
 
     const etag = try setImmutableHeaders(res, hash, metadata.mime);
     if (req.header("if-none-match")) |candidate| {
