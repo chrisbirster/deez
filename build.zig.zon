@@ -10,6 +10,7 @@
         },
         .thrawn = .{
             .url = "git+https://github.com/chrisbirster/thrawn#91e47c9deb19d1ca14512a1171eaf7293318bc0e",
+            .hash = "thrawn-0.1.0-8rln6cS1AQD8Gf9ktnF0TaQoqAuWUQ02SAc8x-hPLhYg",
         },
     },
     .paths = .{
