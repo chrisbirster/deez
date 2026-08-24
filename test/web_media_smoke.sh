@@ -19,6 +19,22 @@ cleanup() {
 }
 trap cleanup EXIT
 
+on_error() {
+  status=$?
+  line=${BASH_LINENO[0]:-unknown}
+  echo "Deez Web media smoke failed at line $line (status $status)" >&2
+  if [[ -f "$tmp/media-headers.txt" ]]; then
+    echo '--- media response headers ---' >&2
+    cat "$tmp/media-headers.txt" >&2
+  fi
+  if [[ -f "$tmp/web.log" ]]; then
+    echo '--- deez web log ---' >&2
+    cat "$tmp/web.log" >&2
+  fi
+  exit "$status"
+}
+trap on_error ERR
+
 python3 - "$tmp/pixel.png" <<'PY'
 import base64, sys
 # A valid 1x1 transparent PNG.
