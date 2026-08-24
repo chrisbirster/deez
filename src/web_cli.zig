@@ -1,5 +1,7 @@
 const std = @import("std");
 const Io = std.Io;
+const config = @import("config.zig");
+const storage = @import("storage/root.zig");
 const web = @import("web.zig");
 
 pub const help_text =
@@ -21,7 +23,24 @@ pub fn run(init: std.process.Init, args: []const []const u8) !void {
     }
 
     const port = try parsePort(args);
-    try web.run(init, .{ .port = port });
+    const selection = try config.resolve(init);
+
+    switch (selection.backend) {
+        .mongodb => {
+            const mongo = try storage.MongoStore.connect(init.io, init.gpa, selection.mongo_uri.?);
+            var store: storage.Store = .{ .mongodb = mongo };
+            defer store.deinit();
+            try web.run(init, &store, .{ .port = port });
+        },
+        .sqlite => {
+            const db_path_z = try init.arena.allocator().dupeZ(u8, selection.sqlite_path.?);
+            var db = try storage.Db.open(db_path_z);
+            defer db.close();
+            try db.migrate();
+            var store: storage.Store = .{ .sqlite = &db };
+            try web.run(init, &store, .{ .port = port });
+        },
+    }
 }
 
 fn parsePort(args: []const []const u8) !u16 {
