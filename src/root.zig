@@ -20,7 +20,7 @@ pub const recovery = @import("recovery.zig");
 pub const parameter_lifecycle = @import("parameter_lifecycle.zig");
 pub const scheduler_migration = @import("scheduler_migration.zig");
 pub const cli = @import("cli.zig");
-pub const thrawn_cli = @import("thrawn_cli.zig");
+pub const thrawn_cli = @import("cli_tree.zig");
 pub const config = @import("config.zig");
 pub const deck_json = @import("deck_json.zig");
 pub const nut = @import("nut.zig");
@@ -46,6 +46,7 @@ pub const Study = study.Study;
 test {
     std.testing.refAllDecls(@This());
     _ = @import("thrawn_cli_test.zig");
+    _ = @import("cli_tree_lifetime_test.zig");
     _ = @import("interchange_test.zig");
     _ = @import("interaction_roundtrip_test.zig");
     _ = @import("study_replay_tests.zig");

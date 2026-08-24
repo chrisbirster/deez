@@ -1,6 +1,6 @@
 const std = @import("std");
 const cli = @import("cli.zig");
-const thrawn_cli = @import("thrawn_cli.zig");
+const thrawn_cli = @import("cli_tree.zig");
 
 fn parse(args: []const []const u8) !thrawn_cli.Route {
     return thrawn_cli.parse(std.testing.allocator, args);
