@@ -3,6 +3,7 @@ const httpz = @import("httpz");
 const build_options = @import("build_options");
 const content = @import("content.zig");
 const storage = @import("storage/root.zig");
+const web_assets = @import("web_assets.zig");
 const web_notes = @import("web_notes.zig");
 
 const Io = std.Io;
@@ -13,6 +14,7 @@ pub const version = build_options.version;
 
 pub const Options = struct {
     port: u16 = default_port,
+    web_root: ?[]const u8 = null,
 };
 
 const CapabilityField = struct {
@@ -58,7 +60,13 @@ const Handler = struct {
     io: Io,
     port: u16,
     store: *storage.Store,
+    web_root: ?[]const u8,
     store_mutex: Io.Mutex = .init,
+
+    fn requestAllowed(self: *Handler, req: *httpz.Request) bool {
+        return isAllowedHost(req.header("host"), self.port) and
+            isAllowedOrigin(req.header("origin"), self.port);
+    }
 
     pub fn dispatch(
         self: *Handler,
@@ -66,9 +74,7 @@ const Handler = struct {
         req: *httpz.Request,
         res: *httpz.Response,
     ) !void {
-        if (!isAllowedHost(req.header("host"), self.port) or
-            !isAllowedOrigin(req.header("origin"), self.port))
-        {
+        if (!self.requestAllowed(req)) {
             forbidden(res);
             return;
         }
@@ -82,7 +88,22 @@ const Handler = struct {
         try action(self, req, res);
     }
 
-    pub fn notFound(_: *Handler, _: *httpz.Request, res: *httpz.Response) !void {
+    pub fn notFound(self: *Handler, req: *httpz.Request, res: *httpz.Response) !void {
+        if (!self.requestAllowed(req)) {
+            forbidden(res);
+            return;
+        }
+
+        if (req.method == .GET and
+            self.web_root != null and
+            !std.mem.startsWith(u8, req.url.path, "/api/"))
+        {
+            switch (try web_assets.serve(self.io, self.web_root.?, req.url.path, res)) {
+                .served => return,
+                .not_found, .unsafe_path => {},
+            }
+        }
+
         try jsonError(res, 404, "not_found", "Not found");
     }
 
@@ -101,6 +122,7 @@ pub fn run(init: std.process.Init, store: *storage.Store, options: Options) !voi
         .io = init.io,
         .port = options.port,
         .store = store,
+        .web_root = options.web_root,
     };
     var server = try httpz.Server(*Handler).init(init.io, init.gpa, .{
         .address = .localhost(options.port),
@@ -139,7 +161,11 @@ pub fn run(init: std.process.Init, store: *storage.Store, options: Options) !voi
     router.delete("/api/v1/notes/:id", deleteNote, .{});
     router.post("/api/v1/notes/preview", previewNote, .{});
 
-    std.debug.print("Deez Web API listening on http://127.0.0.1:{d}/\n", .{options.port});
+    if (options.web_root) |root| {
+        std.debug.print("Deez Web listening on http://127.0.0.1:{d}/ (assets: {s})\n", .{ options.port, root });
+    } else {
+        std.debug.print("Deez Web API listening on http://127.0.0.1:{d}/ (UI assets not found)\n", .{options.port});
+    }
     try server.listen();
 }
 
