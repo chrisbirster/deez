@@ -2,6 +2,9 @@ const std = @import("std");
 const httpz = @import("httpz");
 const build_options = @import("build_options");
 const content = @import("content.zig");
+const storage = @import("storage/root.zig");
+
+const Io = std.Io;
 
 pub const default_port: u16 = 49317;
 pub const api_version = "v1";
@@ -23,8 +26,38 @@ const CapabilityNoteType = struct {
     fields: []const CapabilityField,
 };
 
+const DeckResponse = struct {
+    id: []const u8,
+    name: []const u8,
+    note_count: usize,
+    card_count: usize,
+    due_count: usize,
+};
+
+const NoteSummaryResponse = struct {
+    id: []const u8,
+    deck_id: []const u8,
+    note_type: []const u8,
+    preview: []const u8,
+    card_count: usize,
+    updated_at_ms: i64,
+};
+
+const NoteResponse = struct {
+    id: []const u8,
+    deck_id: []const u8,
+    note_type: []const u8,
+    fields: []const []const u8,
+    tags: []const []const u8,
+    created_at_ms: i64,
+    updated_at_ms: i64,
+};
+
 const Handler = struct {
+    io: Io,
     port: u16,
+    store: *storage.Store,
+    store_mutex: Io.Mutex = .init,
 
     pub fn dispatch(
         self: *Handler,
@@ -38,13 +71,18 @@ const Handler = struct {
             forbidden(res);
             return;
         }
+
+        // The first local API deliberately serializes requests over the shared
+        // Store. SQLite uses one connection, and this conservative boundary also
+        // avoids assuming Mongo client concurrency guarantees before they are
+        // explicitly tested.
+        self.store_mutex.lockUncancelable(self.io);
+        defer self.store_mutex.unlock(self.io);
         try action(self, req, res);
     }
 
     pub fn notFound(_: *Handler, _: *httpz.Request, res: *httpz.Response) !void {
-        res.status = 404;
-        res.content_type = .JSON;
-        res.body = "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"}}";
+        try jsonError(res, 404, "not_found", "Not found");
     }
 
     pub fn uncaughtError(_: *Handler, req: *httpz.Request, res: *httpz.Response, err: anyerror) void {
@@ -55,10 +93,14 @@ const Handler = struct {
     }
 };
 
-pub fn run(init: std.process.Init, options: Options) !void {
+pub fn run(init: std.process.Init, store: *storage.Store, options: Options) !void {
     if (options.port == 0) return error.InvalidPort;
 
-    var handler: Handler = .{ .port = options.port };
+    var handler: Handler = .{
+        .io = init.io,
+        .port = options.port,
+        .store = store,
+    };
     var server = try httpz.Server(*Handler).init(init.io, init.gpa, .{
         .address = .localhost(options.port),
         .workers = .{
@@ -87,6 +129,10 @@ pub fn run(init: std.process.Init, options: Options) !void {
     router.get("/api/v1/health", health, .{});
     router.get("/api/v1/version", versionInfo, .{});
     router.get("/api/v1/capabilities", capabilities, .{});
+    router.get("/api/v1/decks", decks, .{});
+    router.get("/api/v1/decks/:id", deck, .{});
+    router.get("/api/v1/decks/:id/notes", deckNotes, .{});
+    router.get("/api/v1/notes/:id", note, .{});
 
     std.debug.print("Deez Web API listening on http://127.0.0.1:{d}/\n", .{options.port});
     try server.listen();
@@ -114,7 +160,7 @@ fn capabilities(_: *Handler, _: *httpz.Request, res: *httpz.Response) !void {
             };
         }
         note_types[index] = .{
-            .id = try std.fmt.allocPrint(res.arena, "{d}", .{definition.id}),
+            .id = try idText(res.arena, definition.id),
             .slug = definition.slug,
             .name = definition.name,
             .fields = fields,
@@ -137,6 +183,128 @@ fn capabilities(_: *Handler, _: *httpz.Request, res: *httpz.Response) !void {
         .interactions = &interactions,
         .import_formats = &formats,
         .export_formats = &formats,
+    }, .{});
+}
+
+fn decks(self: *Handler, _: *httpz.Request, res: *httpz.Response) !void {
+    const summaries = try self.store.decks(res.arena, nowMs(self.io));
+    const result = try res.arena.alloc(DeckResponse, summaries.len);
+    const content_store = storage.ContentStore.init(self.store);
+
+    for (summaries, 0..) |summary, index| {
+        const notes = try content_store.notesForDeck(res.arena, summary.id);
+        result[index] = .{
+            .id = try idText(res.arena, summary.id),
+            .name = summary.name,
+            .note_count = notes.len,
+            .card_count = summary.card_count,
+            .due_count = summary.due_count,
+        };
+    }
+    try res.json(result, .{});
+}
+
+fn deck(self: *Handler, req: *httpz.Request, res: *httpz.Response) !void {
+    const deck_id = parseRouteId(req, res, "id") orelse return;
+    const owned = (try self.store.getDeck(res.arena, deck_id)) orelse {
+        try jsonError(res, 404, "deck_not_found", "Deck not found");
+        return;
+    };
+    const stats = try self.store.stats(nowMs(self.io), deck_id);
+    const notes = try storage.ContentStore.init(self.store).notesForDeck(res.arena, deck_id);
+
+    try res.json(DeckResponse{
+        .id = try idText(res.arena, owned.id),
+        .name = owned.name,
+        .note_count = notes.len,
+        .card_count = stats.card_count,
+        .due_count = stats.due_count,
+    }, .{});
+}
+
+fn deckNotes(self: *Handler, req: *httpz.Request, res: *httpz.Response) !void {
+    const deck_id = parseRouteId(req, res, "id") orelse return;
+    if (try self.store.getDeck(res.arena, deck_id) == null) {
+        try jsonError(res, 404, "deck_not_found", "Deck not found");
+        return;
+    }
+
+    const notes = try storage.ContentStore.init(self.store).notesForDeck(res.arena, deck_id);
+    const result = try res.arena.alloc(NoteSummaryResponse, notes.len);
+    for (notes, 0..) |entry, index| {
+        result[index] = .{
+            .id = try idText(res.arena, entry.note.id),
+            .deck_id = try idText(res.arena, deck_id),
+            .note_type = try noteTypeSlug(entry.note.note_type_id),
+            .preview = if (entry.note.fields.len == 0) "" else entry.note.fields[0].value,
+            .card_count = entry.card_count,
+            .updated_at_ms = entry.note.updated_at_ms,
+        };
+    }
+    try res.json(result, .{});
+}
+
+fn note(self: *Handler, req: *httpz.Request, res: *httpz.Response) !void {
+    const note_id = parseRouteId(req, res, "id") orelse return;
+    const owned = (try storage.ContentStore.init(self.store).getNote(res.arena, note_id)) orelse {
+        try jsonError(res, 404, "note_not_found", "Note not found");
+        return;
+    };
+    const deck_id = (try storage.ContentMembership.init(self.store).deckIdForNote(res.arena, note_id)) orelse {
+        try jsonError(res, 404, "note_not_attached", "Note is not attached to a deck");
+        return;
+    };
+
+    const fields = try res.arena.alloc([]const u8, owned.fields.len);
+    for (owned.fields, 0..) |field, index| fields[index] = field.value;
+
+    var parsed_tags = std.json.parseFromSlice([]const []const u8, res.arena, owned.tags_json, .{}) catch {
+        try jsonError(res, 500, "invalid_note_tags", "Stored note tags are invalid");
+        return;
+    };
+    defer parsed_tags.deinit();
+
+    try res.json(NoteResponse{
+        .id = try idText(res.arena, owned.id),
+        .deck_id = try idText(res.arena, deck_id),
+        .note_type = try noteTypeSlug(owned.note_type_id),
+        .fields = fields,
+        .tags = parsed_tags.value,
+        .created_at_ms = owned.created_at_ms,
+        .updated_at_ms = owned.updated_at_ms,
+    }, .{});
+}
+
+fn parseRouteId(req: *httpz.Request, res: *httpz.Response, name: []const u8) ?u64 {
+    const text = req.param(name) orelse {
+        jsonError(res, 400, "invalid_id", "Missing resource ID") catch {};
+        return null;
+    };
+    return std.fmt.parseInt(u64, text, 10) catch {
+        jsonError(res, 400, "invalid_id", "Resource ID must be an unsigned integer") catch {};
+        return null;
+    };
+}
+
+fn noteTypeSlug(note_type_id: content.NoteTypeId) ![]const u8 {
+    return (try content.BuiltInNoteType.fromId(note_type_id)).definition().slug;
+}
+
+fn idText(allocator: std.mem.Allocator, id: u64) ![]const u8 {
+    return std.fmt.allocPrint(allocator, "{d}", .{id});
+}
+
+fn nowMs(io: Io) i64 {
+    return Io.Timestamp.now(io, .real).toSeconds() * 1_000;
+}
+
+fn jsonError(res: *httpz.Response, status: u16, code: []const u8, message: []const u8) !void {
+    res.status = status;
+    try res.json(.{
+        .@"error" = .{
+            .code = code,
+            .message = message,
+        },
     }, .{});
 }
 
@@ -185,4 +353,9 @@ test "local web origin validation permits absent or exact same-origin headers" {
     try std.testing.expect(!isAllowedOrigin("http://127.0.0.1:49318", 49317));
     try std.testing.expect(!isAllowedOrigin("http://localhost:49317.evil.example", 49317));
     try std.testing.expect(!isAllowedOrigin("https://example.com", 49317));
+}
+
+test "route IDs only accept unsigned decimal integers" {
+    try std.testing.expectEqual(@as(u64, 42), try std.fmt.parseInt(u64, "42", 10));
+    try std.testing.expectError(error.InvalidCharacter, std.fmt.parseInt(u64, "-1", 10));
 }
