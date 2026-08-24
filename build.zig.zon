@@ -9,7 +9,7 @@
             .hash = "bongo-0.6.0-H33KDXopCwDlrfKOVUebF5IEweq_CgsO9ioPKj_C-gu3",
         },
         .thrawn = .{
-            .url = "git+https://github.com/chrisbirster/thrawn?ref=v0.1.0",
+            .url = "git+https://github.com/chrisbirster/thrawn#91e47c9deb19d1ca14512a1171eaf7293318bc0e",
         },
     },
     .paths = .{
