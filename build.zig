@@ -4,11 +4,25 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    const raw_version = std.Io.Dir.cwd().readFileAlloc(
+        b.graph.io,
+        "VERSION",
+        b.allocator,
+        .limited(128),
+    ) catch @panic("failed to read VERSION");
+    const version = std.mem.trim(u8, raw_version, " \t\r\n");
+    const deez_build_options = b.addOptions();
+    deez_build_options.addOption([]const u8, "version", version);
+
     const bongo_dependency = b.dependency("bongo", .{
         .target = target,
         .optimize = optimize,
     });
     const thrawn_dependency = b.dependency("thrawn", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    const httpz_dependency = b.dependency("httpz", .{
         .target = target,
         .optimize = optimize,
     });
@@ -22,6 +36,8 @@ pub fn build(b: *std.Build) void {
     mod.linkSystemLibrary("sqlite3", .{});
     mod.addImport("bongo", bongo_dependency.module("bongo"));
     mod.addImport("thrawn", thrawn_dependency.module("thrawn"));
+    mod.addImport("httpz", httpz_dependency.module("httpz"));
+    mod.addOptions("deez_build_options", deez_build_options);
 
     const exe = b.addExecutable(.{
         .name = "deez",
