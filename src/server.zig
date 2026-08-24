@@ -3,6 +3,7 @@ const httpz = @import("httpz");
 
 const config = @import("config.zig");
 const content = @import("content.zig");
+const note_service = @import("note_service.zig");
 const storage = @import("storage/root.zig");
 
 const Io = std.Io;
@@ -24,6 +25,22 @@ const App = struct {
     allocator: std.mem.Allocator,
     io: Io,
     store: *storage.Store,
+};
+
+const CreateNoteBody = struct {
+    note_type: []const u8,
+    fields: []const []const u8,
+    tags_json: []const u8 = "[]",
+};
+
+const UpdateNoteBody = struct {
+    fields: []const []const u8,
+    tags_json: []const u8 = "[]",
+};
+
+const PreviewNoteBody = struct {
+    note_type: []const u8,
+    fields: []const []const u8,
 };
 
 pub fn isCommand(args: []const []const u8) bool {
@@ -114,7 +131,11 @@ fn serveWithStore(
     router.get("/api/v1/decks", listDecks, .{});
     router.get("/api/v1/decks/:deck_id", getDeck, .{});
     router.get("/api/v1/decks/:deck_id/notes", listNotes, .{});
+    router.post("/api/v1/decks/:deck_id/notes", createNote, .{});
     router.get("/api/v1/notes/:note_id", getNote, .{});
+    router.patch("/api/v1/notes/:note_id", updateNote, .{});
+    router.delete("/api/v1/notes/:note_id", deleteNote, .{});
+    router.post("/api/v1/notes/preview", previewNote, .{});
     router.get("/api/v1/decks/:deck_id/cards", listCards, .{});
     router.get("/api/v1/cards/:card_id", getCard, .{});
 
@@ -146,9 +167,58 @@ fn writeError(
     }, .{});
 }
 
+fn writeDomainError(res: *httpz.Response, err: anyerror) !void {
+    return switch (err) {
+        error.NoteNotFound => writeError(res, 404, "note_not_found", "note does not exist"),
+        error.ReviewHistoryExists => writeError(
+            res,
+            409,
+            "review_history_exists",
+            "this change would remove a generated card that has review history",
+        ),
+        error.NoteHasNoGeneratedCards,
+        error.NoteDeckMismatch,
+        error.GeneratedCardSourceMissing,
+        error.CardNotFound,
+        => writeError(res, 409, "inconsistent_note_state", "note/card generation state is inconsistent"),
+        error.UnsupportedBuiltInNoteType,
+        error.UnknownNoteType,
+        => writeError(res, 422, "unknown_note_type", "note type is not supported"),
+        error.InvalidFieldCount,
+        error.InvalidText,
+        error.InvalidCloze,
+        error.ClozeRequired,
+        error.NotEnoughChoices,
+        error.InvalidInteractionText,
+        error.DuplicateChoiceId,
+        error.UnknownChoiceId,
+        error.CorrectChoiceRequired,
+        error.DuplicateCorrectChoiceId,
+        error.InvalidOcclusionMediaReference,
+        error.OcclusionMaskRequired,
+        error.InvalidOcclusionRect,
+        error.DuplicateOcclusionId,
+        error.OcclusionMaskNotFound,
+        => writeError(res, 422, "invalid_note", @errorName(err)),
+        else => err,
+    };
+}
+
 fn pathId(req: *httpz.Request, name: []const u8) !u64 {
     const raw = req.param(name) orelse return error.InvalidId;
     return std.fmt.parseInt(u64, raw, 10) catch return error.InvalidId;
+}
+
+fn parseBody(req: *httpz.Request, comptime T: type, res: *httpz.Response) !?T {
+    const value = req.json(T) catch {
+        try writeError(res, 400, "invalid_json", "request body must be valid JSON");
+        return null;
+    };
+    if (value == null) {
+        try writeError(res, 400, "missing_body", "request body is required");
+        return null;
+    }
+    return value;
 }
 
 fn health(app: *App, req: *httpz.Request, res: *httpz.Response) !void {
@@ -283,6 +353,75 @@ fn getNote(app: *App, req: *httpz.Request, res: *httpz.Response) !void {
         return writeError(res, 404, "note_not_found", "note does not exist");
     defer note.deinit(app.allocator);
     try res.json(.{ .note = note }, .{});
+}
+
+fn createNote(app: *App, req: *httpz.Request, res: *httpz.Response) !void {
+    const deck_id = pathId(req, "deck_id") catch
+        return writeError(res, 400, "invalid_id", "deck_id must be an unsigned integer");
+    const deck = (try app.store.getDeck(app.allocator, deck_id)) orelse
+        return writeError(res, 404, "deck_not_found", "deck does not exist");
+    defer deck.deinit(app.allocator);
+
+    const body = (try parseBody(req, CreateNoteBody, res)) orelse return;
+    const kind = content.BuiltInNoteType.parse(body.note_type) catch
+        return writeError(res, 422, "unknown_note_type", "note type is not supported");
+
+    const created = note_service.create(
+        app.allocator,
+        app.store,
+        deck_id,
+        kind,
+        body.fields,
+        body.tags_json,
+        nowMs(app.io),
+    ) catch |err| return writeDomainError(res, err);
+    defer created.deinit(app.allocator);
+
+    res.status = 201;
+    try res.json(.{
+        .note_id = created.note_id,
+        .card_ids = created.card_ids,
+    }, .{});
+}
+
+fn updateNote(app: *App, req: *httpz.Request, res: *httpz.Response) !void {
+    const note_id = pathId(req, "note_id") catch
+        return writeError(res, 400, "invalid_id", "note_id must be an unsigned integer");
+    const body = (try parseBody(req, UpdateNoteBody, res)) orelse return;
+
+    const card_ids = note_service.update(
+        app.allocator,
+        app.store,
+        note_id,
+        body.fields,
+        body.tags_json,
+        nowMs(app.io),
+    ) catch |err| return writeDomainError(res, err);
+    defer app.allocator.free(card_ids);
+
+    try res.json(.{
+        .note_id = note_id,
+        .card_ids = card_ids,
+    }, .{});
+}
+
+fn deleteNote(app: *App, req: *httpz.Request, res: *httpz.Response) !void {
+    const note_id = pathId(req, "note_id") catch
+        return writeError(res, 400, "invalid_id", "note_id must be an unsigned integer");
+    note_service.delete(app.allocator, app.store, note_id) catch |err|
+        return writeDomainError(res, err);
+    res.status = 204;
+}
+
+fn previewNote(app: *App, req: *httpz.Request, res: *httpz.Response) !void {
+    const body = (try parseBody(req, PreviewNoteBody, res)) orelse return;
+    const kind = content.BuiltInNoteType.parse(body.note_type) catch
+        return writeError(res, 422, "unknown_note_type", "note type is not supported");
+
+    const preview = note_service.preview(app.allocator, kind, body.fields) catch |err|
+        return writeDomainError(res, err);
+    defer preview.deinit(app.allocator);
+    try res.json(.{ .cards = preview.cards }, .{});
 }
 
 test "serve options are loopback-port only" {
