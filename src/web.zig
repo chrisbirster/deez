@@ -1,6 +1,7 @@
 const std = @import("std");
 const httpz = @import("httpz");
 const build_options = @import("build_options");
+const browser = @import("browser.zig");
 const content = @import("content.zig");
 const storage = @import("storage/root.zig");
 const web_assets = @import("web_assets.zig");
@@ -15,6 +16,7 @@ pub const version = build_options.version;
 pub const Options = struct {
     port: u16 = default_port,
     web_root: ?[]const u8 = null,
+    open_browser: bool = true,
 };
 
 const CapabilityField = struct {
@@ -166,6 +168,17 @@ pub fn run(init: std.process.Init, store: *storage.Store, options: Options) !voi
     } else {
         std.debug.print("Deez Web API listening on http://127.0.0.1:{d}/ (UI assets not found)\n", .{options.port});
     }
+
+    if (options.web_root != null and options.open_browser) {
+        const listen_thread = try server.listenInNewThread();
+        const url = try std.fmt.allocPrint(init.arena.allocator(), "http://127.0.0.1:{d}/", .{options.port});
+        browser.openDefault(init.gpa, url) catch |err| {
+            std.log.warn("unable to open Deez Web in the default browser: {}", .{err});
+        };
+        listen_thread.join();
+        return;
+    }
+
     try server.listen();
 }
 
