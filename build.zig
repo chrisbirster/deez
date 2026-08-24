@@ -8,6 +8,10 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    const thrawn_dependency = b.dependency("thrawn", .{
+        .target = target,
+        .optimize = optimize,
+    });
 
     const mod = b.addModule("deez", .{
         .root_source_file = b.path("src/root.zig"),
@@ -17,6 +21,7 @@ pub fn build(b: *std.Build) void {
     });
     mod.linkSystemLibrary("sqlite3", .{});
     mod.addImport("bongo", bongo_dependency.module("bongo"));
+    mod.addImport("thrawn", thrawn_dependency.module("thrawn"));
 
     const exe = b.addExecutable(.{
         .name = "deez",
