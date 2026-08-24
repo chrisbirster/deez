@@ -126,21 +126,29 @@ fn nutImportHandler(ctx: *th.Context) !void {
 }
 
 fn noteAddHandler(ctx: *th.Context) !void {
-    try setRoute(ctx, .{ .core = .{ .note_add = .{
-        .deck_id = try parseId(ctx.args[0]),
-        .note_type = try requireText(ctx.args[1]),
-        // parsed.positionals owns only the outer slice. Keep the returned
-        // variadic field slice borrowed from the caller's argv instead.
-        .fields = try rawTail(ctx, 2),
-    } } });
+    try setRoute(ctx, .{
+        .core = .{
+            .note_add = .{
+                .deck_id = try parseId(ctx.args[0]),
+                .note_type = try requireText(ctx.args[1]),
+                // parsed.positionals owns only the outer slice. Keep the returned
+                // variadic field slice borrowed from the caller's argv instead.
+                .fields = try rawTail(ctx, 2),
+            },
+        },
+    });
 }
 
 fn noteEditHandler(ctx: *th.Context) !void {
-    try setRoute(ctx, .{ .core = .{ .note_edit = .{
-        .deck_id = try parseId(ctx.args[0]),
-        .note_id = try parseId(ctx.args[1]),
-        .fields = try rawTail(ctx, 2),
-    } } });
+    try setRoute(ctx, .{
+        .core = .{
+            .note_edit = .{
+                .deck_id = try parseId(ctx.args[0]),
+                .note_id = try parseId(ctx.args[1]),
+                .fields = try rawTail(ctx, 2),
+            },
+        },
+    });
 }
 
 fn notesHandler(ctx: *th.Context) !void {
