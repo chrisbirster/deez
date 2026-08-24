@@ -197,6 +197,111 @@ assert deck["card_count"] == 2, deck
 assert deck["due_count"] == 2, deck
 PY
 
+# Study uses the same FSRS core as the terminal flow and protects immutable history.
+curl -fsS "$api/decks/1/study/next" >"$tmp/study-next.json"
+python3 - "$tmp/study-next.json" "$forward_card_id" <<'PY'
+import json, sys
+with open(sys.argv[1]) as f:
+    body = json.load(f)
+card = body["card"]
+assert card is not None, body
+assert card["id"] == sys.argv[2], body
+assert card["deck_id"] == "1", body
+assert card["due_at_ms"] is None, body
+PY
+
+curl -fsS "$api/cards/$forward_card_id/study/preview" >"$tmp/study-preview.json"
+python3 - "$tmp/study-preview.json" "$forward_card_id" <<'PY'
+import json, sys
+with open(sys.argv[1]) as f:
+    body = json.load(f)
+assert body["card_id"] == sys.argv[2], body
+assert body["review_count"] == 0, body
+assert body["retrievability"] is None, body
+schedule = body["schedule"]
+assert [schedule[name]["rating"] for name in ("again", "hard", "good", "easy")] == [1, 2, 3, 4], body
+assert all(schedule[name]["due_at_ms"] > 0 for name in schedule), body
+assert all(schedule[name]["interval_days"] > 0 for name in schedule), body
+PY
+
+invalid_rating_code=$(curl -sS -o "$tmp/invalid-rating.json" -w '%{http_code}' \
+  -X POST -H 'Content-Type: application/json' \
+  --data '{"rating":5,"expected_review_count":0}' \
+  "$api/cards/$forward_card_id/reviews")
+test "$invalid_rating_code" = "400"
+python3 - "$tmp/invalid-rating.json" <<'PY'
+import json, sys
+with open(sys.argv[1]) as f:
+    body = json.load(f)
+assert body["error"]["code"] == "invalid_rating", body
+PY
+
+review_code=$(curl -sS -o "$tmp/review.json" -w '%{http_code}' \
+  -X POST -H 'Content-Type: application/json' \
+  --data '{"rating":3,"expected_review_count":0}' \
+  "$api/cards/$forward_card_id/reviews")
+test "$review_code" = "201"
+review_due=$(python3 - "$tmp/review.json" "$forward_card_id" <<'PY'
+import json, sys
+with open(sys.argv[1]) as f:
+    body = json.load(f)
+assert body["card_id"] == sys.argv[2], body
+assert body["rating"] == 3, body
+assert body["review_id"].isdigit(), body
+assert body["interval_days"] > 0, body
+assert body["scheduler"]["last_reviewed_at_ms"] is not None, body
+assert body["scheduler"]["due_at_ms"] == body["due_at_ms"], body
+print(body["due_at_ms"])
+PY
+)
+
+test "$review_due" -gt 0
+
+stale_code=$(curl -sS -o "$tmp/stale-review.json" -w '%{http_code}' \
+  -X POST -H 'Content-Type: application/json' \
+  --data '{"rating":3,"expected_review_count":0}' \
+  "$api/cards/$forward_card_id/reviews")
+test "$stale_code" = "409"
+python3 - "$tmp/stale-review.json" <<'PY'
+import json, sys
+with open(sys.argv[1]) as f:
+    body = json.load(f)
+assert body["error"]["code"] == "stale_review", body
+PY
+
+early_code=$(curl -sS -o "$tmp/early-review.json" -w '%{http_code}' \
+  -X POST -H 'Content-Type: application/json' \
+  --data '{"rating":3,"expected_review_count":1}' \
+  "$api/cards/$forward_card_id/reviews")
+test "$early_code" = "409"
+python3 - "$tmp/early-review.json" <<'PY'
+import json, sys
+with open(sys.argv[1]) as f:
+    body = json.load(f)
+assert body["error"]["code"] == "card_not_due", body
+PY
+
+curl -fsS "$api/cards/$forward_card_id" >"$tmp/reviewed-card.json"
+python3 - "$tmp/reviewed-card.json" "$review_due" <<'PY'
+import json, sys
+with open(sys.argv[1]) as f:
+    card = json.load(f)
+assert card["review_count"] == 1, card
+assert card["scheduler"]["due_at_ms"] == int(sys.argv[2]), card
+assert card["scheduler"]["last_reviewed_at_ms"] is not None, card
+PY
+
+curl -fsS "$api/decks/1/study/next" >"$tmp/study-next-after-review.json"
+python3 - "$tmp/study-next-after-review.json" "$forward_card_id" <<'PY'
+import json, sys
+with open(sys.argv[1]) as f:
+    body = json.load(f)
+card = body["card"]
+assert card is not None, body
+assert card["id"] != sys.argv[2], body
+assert card["due_at_ms"] is None, body
+PY
+
 delete_code=$(curl -sS -o "$tmp/delete.txt" -w '%{http_code}' -X DELETE "$api/notes/$note_id")
 test "$delete_code" = "204"
 
