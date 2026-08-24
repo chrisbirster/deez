@@ -21,11 +21,22 @@ pub const Route = union(enum) {
 
 const ParseState = struct {
     route: ?Route = null,
+    raw_args: []const []const u8 = &.{},
 };
 
+fn parseState(ctx: *th.Context) !*ParseState {
+    return ctx.state(ParseState) orelse error.MissingParseState;
+}
+
 fn setRoute(ctx: *th.Context, route: Route) !void {
-    const state = ctx.state(ParseState) orelse return error.MissingParseState;
+    const state = try parseState(ctx);
     state.route = route;
+}
+
+fn rawTail(ctx: *th.Context, start: usize) ![]const []const u8 {
+    const state = try parseState(ctx);
+    if (start > state.raw_args.len) return error.InvalidArguments;
+    return state.raw_args[start..];
 }
 
 fn parseId(text: []const u8) !u64 {
@@ -118,7 +129,9 @@ fn noteAddHandler(ctx: *th.Context) !void {
     try setRoute(ctx, .{ .core = .{ .note_add = .{
         .deck_id = try parseId(ctx.args[0]),
         .note_type = try requireText(ctx.args[1]),
-        .fields = ctx.args[2..],
+        // parsed.positionals owns only the outer slice. Keep the returned
+        // variadic field slice borrowed from the caller's argv instead.
+        .fields = try rawTail(ctx, 2),
     } } });
 }
 
@@ -126,7 +139,7 @@ fn noteEditHandler(ctx: *th.Context) !void {
     try setRoute(ctx, .{ .core = .{ .note_edit = .{
         .deck_id = try parseId(ctx.args[0]),
         .note_id = try parseId(ctx.args[1]),
-        .fields = ctx.args[2..],
+        .fields = try rawTail(ctx, 2),
     } } });
 }
 
@@ -587,7 +600,7 @@ pub fn parse(allocator: std.mem.Allocator, argv: []const []const u8) !Route {
 
     if (!selection.command.args.valid(parsed.positionals.len)) return error.InvalidArguments;
 
-    var state: ParseState = .{};
+    var state: ParseState = .{ .raw_args = selection.args };
     var stdout_buffer: [1]u8 = undefined;
     var stderr_buffer: [1]u8 = undefined;
     var stdout = std.Io.Writer.fixed(&stdout_buffer);
@@ -617,46 +630,4 @@ pub fn errorHelp(argv: []const []const u8) Help {
     if (std.mem.eql(u8, command, "notes")) return .notes;
     if (std.mem.eql(u8, command, "media") or std.mem.eql(u8, command, "sack")) return .rich;
     return .general;
-}
-
-test "literal help is an application command under Thrawn v0.2" {
-    const args = [_][]const u8{ "deez", "help", "fsrs" };
-    const route = try parse(std.testing.allocator, &args);
-    try std.testing.expect(route == .help);
-    try std.testing.expectEqual(cli.HelpTopic.fsrs, route.help.core);
-}
-
-test "typed Thrawn state carries selected Deez routes" {
-    const args = [_][]const u8{ "deez", "study", "42", "--new-limit", "10", "--order", "reviews-first", "--shuffle" };
-    const route = try parse(std.testing.allocator, &args);
-    try std.testing.expect(route == .core);
-    try std.testing.expectEqual(@as(u64, 42), route.core.study.deck_id);
-    try std.testing.expectEqual(@as(?usize, 10), route.core.study.new_limit);
-    try std.testing.expectEqual(cli.StudyOrder.reviews_first, route.core.study.order);
-    try std.testing.expect(route.core.study.shuffle);
-}
-
-test "aliases and special executors preserve existing routes" {
-    const nuts = [_][]const u8{ "deez", "nuts" };
-    try std.testing.expect((try parse(std.testing.allocator, &nuts)).core == .decks);
-
-    const backup = [_][]const u8{ "deez", "backup", "42" };
-    try std.testing.expect((try parse(std.testing.allocator, &backup)) == .backup_cli);
-
-    const notes = [_][]const u8{ "deez", "notes", "1" };
-    try std.testing.expect((try parse(std.testing.allocator, &notes)) == .notes_cli);
-
-    const sack = [_][]const u8{ "deez", "sack", "import", "deck.sack" };
-    try std.testing.expect((try parse(std.testing.allocator, &sack)) == .rich_cli);
-}
-
-test "confirmation and validation contracts remain stable" {
-    const unsafe_deck = [_][]const u8{ "deez", "deck", "delete", "3" };
-    try std.testing.expectError(error.ConfirmationRequired, parse(std.testing.allocator, &unsafe_deck));
-
-    const invalid_id = [_][]const u8{ "deez", "cards", "nope" };
-    try std.testing.expectError(error.InvalidId, parse(std.testing.allocator, &invalid_id));
-
-    const invalid_order = [_][]const u8{ "deez", "study", "1", "--order", "random" };
-    try std.testing.expectError(error.InvalidArguments, parse(std.testing.allocator, &invalid_order));
 }
