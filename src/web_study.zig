@@ -175,6 +175,9 @@ pub fn review(
     const input = req.json(ReviewInput) catch {
         try jsonError(res, 400, "invalid_json", "Request body must include rating and expected_review_count");
         return;
+    } orelse {
+        try jsonError(res, 400, "missing_body", "Request body must include rating and expected_review_count");
+        return;
     };
     const rating = fsrs.Rating.fromValue(input.rating) catch {
         try jsonError(res, 400, "invalid_rating", "Rating must be 1 (Again), 2 (Hard), 3 (Good), or 4 (Easy)");
