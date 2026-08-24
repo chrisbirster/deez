@@ -4,8 +4,12 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const raw_version = std.fs.cwd().readFileAlloc(b.allocator, "VERSION", 128) catch
-        @panic("failed to read VERSION");
+    const raw_version = std.Io.Dir.cwd().readFileAlloc(
+        b.graph.io,
+        "VERSION",
+        b.allocator,
+        .limited(128),
+    ) catch @panic("failed to read VERSION");
     const version = std.mem.trim(u8, raw_version, " \t\r\n");
     const deez_build_options = b.addOptions();
     deez_build_options.addOption([]const u8, "version", version);
