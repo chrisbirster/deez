@@ -11,6 +11,7 @@ const mongodb_cards = @import("mongodb_cards.zig");
 const card_lifecycle = @import("card_lifecycle.zig");
 
 const Allocator = std.mem.Allocator;
+const all_due_limit: usize = @intCast(std.math.maxInt(i64));
 
 /// Deez persistence boundary.
 ///
@@ -449,7 +450,7 @@ pub const Store = union(enum) {
                 for (deck_cards) |card| card.deinit(allocator);
                 allocator.free(deck_cards);
             }
-            const due = try self.dueCards(allocator, summary.id, now_ms, std.math.maxInt(usize));
+            const due = try self.dueCards(allocator, summary.id, now_ms, all_due_limit);
             defer {
                 for (due) |card| card.deinit(allocator);
                 allocator.free(due);
@@ -476,7 +477,7 @@ pub const Store = union(enum) {
                 for (deck_cards) |card| card.deinit(std.heap.page_allocator);
                 std.heap.page_allocator.free(deck_cards);
             }
-            const due = try self.dueCards(std.heap.page_allocator, id, now_ms, std.math.maxInt(usize));
+            const due = try self.dueCards(std.heap.page_allocator, id, now_ms, all_due_limit);
             defer {
                 for (due) |card| card.deinit(std.heap.page_allocator);
                 std.heap.page_allocator.free(due);
