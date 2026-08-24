@@ -4,6 +4,7 @@ const card_types = @import("card_types.zig");
 const content = @import("content.zig");
 const fsrs = @import("fsrs/root.zig");
 const storage = @import("storage/root.zig");
+const generated_store = @import("storage/generated_card_store.zig");
 
 fn contains(ids: []const u64, id: u64) bool {
     for (ids) |candidate| if (candidate == id) return true;
@@ -64,6 +65,7 @@ pub fn create(
         tags_json,
         created_at_ms,
     );
+    errdefer generated.deinit(allocator);
     for (generated.card_ids) |card_id| try store.restoreCard(card_id);
     return generated;
 }
@@ -89,6 +91,35 @@ pub fn update(
     errdefer allocator.free(active_ids);
     try reconcile(allocator, store, deck_id, note_id, active_ids, updated_at_ms);
     return active_ids;
+}
+
+/// Delete an editable logical note while retaining its physical study history.
+/// Generated cards are retired first; only note/generated-card metadata is then
+/// removed. This makes the deletion final without violating immutable reviews.
+pub fn delete(
+    allocator: std.mem.Allocator,
+    store: *storage.Store,
+    deck_id: u64,
+    note_id: content.NoteId,
+    deleted_at_ms: i64,
+) !void {
+    const physical = try store.allCards(allocator, deck_id);
+    defer {
+        for (physical) |card| card.deinit(allocator);
+        allocator.free(physical);
+    }
+
+    var found = false;
+    const content_store = storage.ContentStore.init(store);
+    for (physical) |card| {
+        const source = (try content_store.cardSource(allocator, card.id)) orelse continue;
+        defer source.deinit(allocator);
+        if (source.note_id != note_id) continue;
+        found = true;
+        try store.retireCard(card.id, deleted_at_ms);
+    }
+    if (!found) return error.NoteNotFound;
+    try generated_store.deleteNote(store, note_id);
 }
 
 test "editing generated multiplicity retires and later restores the same reviewed card" {
@@ -158,4 +189,38 @@ test "editing generated multiplicity retires and later restores the same reviewe
     const history_after_restore = try store.loadHistory(std.testing.allocator, reverse_id);
     defer std.testing.allocator.free(history_after_restore);
     try std.testing.expectEqual(@as(usize, 1), history_after_restore.len);
+}
+
+test "deleting a reviewed note retires its card but preserves review history" {
+    var db = try storage.Db.open(":memory:");
+    defer db.close();
+    try db.migrate();
+    var store: storage.Store = .{ .sqlite = &db };
+    const deck_id = try store.createDeck("delete", 0);
+    const values = [_][]const u8{ "front", "back" };
+    const created = try create(
+        std.testing.allocator,
+        &store,
+        deck_id,
+        .basic,
+        &values,
+        "[]",
+        0,
+    );
+    defer created.deinit(std.testing.allocator);
+    const card_id = created.card_ids[0];
+    _ = try db.appendReview(card_id, fsrs.Rating.easy, 1, null, null);
+
+    try delete(std.testing.allocator, &store, deck_id, created.note_id, 2);
+    try std.testing.expect(try store.isCardRetired(card_id));
+    try std.testing.expect((try storage.ContentStore.init(&store).getNote(std.testing.allocator, created.note_id)) == null);
+
+    const active = try store.cards(std.testing.allocator, deck_id);
+    defer std.testing.allocator.free(active);
+    try std.testing.expectEqual(@as(usize, 0), active.len);
+
+    const history = try store.loadHistory(std.testing.allocator, card_id);
+    defer std.testing.allocator.free(history);
+    try std.testing.expectEqual(@as(usize, 1), history.len);
+    try std.testing.expectEqual(fsrs.Rating.easy, history[0].rating);
 }
