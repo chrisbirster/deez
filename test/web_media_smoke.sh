@@ -105,6 +105,87 @@ forbidden_code=$(curl -sS -o "$tmp/forbidden.json" -w '%{http_code}' \
   -H 'Origin: https://example.com' "$api/media/$media_hash")
 test "$forbidden_code" = "403"
 
+# Browser uploads use raw bytes. Make this larger than the 1 MiB JSON limit so
+# the smoke exercises httpz's lazy reader rather than only the eager-body path.
+python3 - "$tmp/upload.bin" <<'PY'
+import sys
+with open(sys.argv[1], 'wb') as f:
+    chunk = bytes(range(256)) * 256
+    for _ in range(32):
+        f.write(chunk)
+PY
+expected_upload_hash=$(python3 - "$tmp/upload.bin" <<'PY'
+import hashlib, sys
+with open(sys.argv[1], 'rb') as f:
+    print(hashlib.sha256(f.read()).hexdigest())
+PY
+)
+upload_code=$(curl -sS -o "$tmp/upload.json" -w '%{http_code}' \
+  -X POST -H 'Expect:' \
+  -H 'Content-Type: application/octet-stream' \
+  -H 'X-Deez-Filename: upload.bin' \
+  --data-binary @"$tmp/upload.bin" \
+  "$api/media")
+test "$upload_code" = "201"
+upload_hash=$(python3 - "$tmp/upload.json" "$expected_upload_hash" <<'PY'
+import json, sys
+with open(sys.argv[1]) as f:
+    body = json.load(f)
+expected = sys.argv[2]
+assert body['sha256'] == expected, body
+assert body['reference'] == f'deez-media://sha256:{expected}', body
+assert body['mime'] == 'application/octet-stream', body
+assert body['size'] == 2 * 1024 * 1024, body
+assert body['original_filename'] == 'upload.bin', body
+print(body['sha256'])
+PY
+)
+upload_path="$HOME/.local/share/deez/media/sha256/${upload_hash:0:2}/$upload_hash"
+test -f "$upload_path"
+curl -fsS "$api/media/$upload_hash" -o "$tmp/upload-served.bin"
+cmp "$tmp/upload.bin" "$tmp/upload-served.bin"
+
+missing_filename_code=$(curl -sS -o "$tmp/missing-filename.json" -w '%{http_code}' \
+  -X POST -H 'Content-Type: image/png' --data-binary @"$tmp/pixel.png" "$api/media")
+test "$missing_filename_code" = "400"
+python3 - "$tmp/missing-filename.json" <<'PY'
+import json, sys
+with open(sys.argv[1]) as f:
+    body = json.load(f)
+assert body['error']['code'] == 'missing_media_filename', body
+PY
+
+invalid_filename_code=$(curl -sS -o "$tmp/invalid-filename.json" -w '%{http_code}' \
+  -X POST -H 'Content-Type: image/png' -H 'X-Deez-Filename: ../pixel.png' \
+  --data-binary @"$tmp/pixel.png" "$api/media")
+test "$invalid_filename_code" = "400"
+
+upload_forbidden_code=$(curl -sS -o "$tmp/upload-forbidden.json" -w '%{http_code}' \
+  -X POST -H 'Origin: https://example.com' -H 'Content-Type: image/png' \
+  -H 'X-Deez-Filename: pixel.png' --data-binary @"$tmp/pixel.png" "$api/media")
+test "$upload_forbidden_code" = "403"
+
+# Large request bodies are only permitted on the media collection route. A
+# normal JSON endpoint must retain its historical 1 MiB request policy even
+# though httpz is configured to lazily read known-length upload bodies.
+python3 - "$tmp/large.json" <<'PY'
+import sys
+with open(sys.argv[1], 'w') as f:
+    f.write('{"padding":"')
+    f.write('x' * (1024 * 1024 + 1))
+    f.write('"}')
+PY
+large_json_code=$(curl -sS -o "$tmp/large-json.json" -w '%{http_code}' \
+  -X POST -H 'Expect:' -H 'Content-Type: application/json' \
+  --data-binary @"$tmp/large.json" "$api/notes/preview")
+test "$large_json_code" = "413"
+python3 - "$tmp/large-json.json" <<'PY'
+import json, sys
+with open(sys.argv[1]) as f:
+    body = json.load(f)
+assert body['error']['code'] == 'request_too_large', body
+PY
+
 # Content-addressed reads must fail closed if the on-disk blob is modified.
 python3 - "$media_path" <<'PY'
 import sys

@@ -15,6 +15,7 @@ const Io = std.Io;
 pub const default_port: u16 = 49317;
 pub const api_version = "v1";
 pub const version = build_options.version;
+const max_api_body_bytes: usize = 1024 * 1024;
 
 pub const Options = struct {
     port: u16 = default_port,
@@ -85,9 +86,15 @@ const Handler = struct {
             return;
         }
 
-        // Hash-addressed media does not touch the shared Store, so do not hold
-        // the database mutex while sending potentially large local media blobs.
-        if (std.mem.startsWith(u8, req.url.path, "/api/v1/media/")) {
+        const media_request = isMediaApiPath(req.url.path);
+        if (!media_request and req.body_len > max_api_body_bytes) {
+            try jsonError(res, 413, "request_too_large", "Deez Web API JSON bodies are limited to 1 MiB");
+            return;
+        }
+
+        // Hash-addressed media reads and uploads do not touch the shared Store,
+        // so do not hold the database mutex while transferring local media.
+        if (media_request) {
             try action(self, req, res);
             return;
         }
@@ -145,7 +152,11 @@ pub fn run(init: std.process.Init, store: *storage.Store, options: Options) !voi
             .max_conn = 64,
         },
         .request = .{
-            .max_body_size = 1024 * 1024,
+            .max_body_size = max_api_body_bytes,
+            // Bodies above the normal JSON limit are left on the socket. The
+            // dispatch boundary rejects them for every route except media upload,
+            // whose handler applies its own 32 MiB cap while reading the stream.
+            .lazy_read_size = max_api_body_bytes + 1,
             .max_header_count = 32,
             .max_param_count = 16,
             .max_query_count = 32,
@@ -167,6 +178,7 @@ pub fn run(init: std.process.Init, store: *storage.Store, options: Options) !voi
     router.get("/api/v1/health", health, .{});
     router.get("/api/v1/version", versionInfo, .{});
     router.get("/api/v1/capabilities", capabilities, .{});
+    router.post("/api/v1/media", mediaUpload, .{});
     router.get("/api/v1/media/:hash", mediaAsset, .{});
     router.get("/api/v1/decks", decks, .{});
     router.get("/api/v1/decks/:id", deck, .{});
@@ -247,6 +259,10 @@ fn capabilities(_: *Handler, _: *httpz.Request, res: *httpz.Response) !void {
         .import_formats = &formats,
         .export_formats = &formats,
     }, .{});
+}
+
+fn mediaUpload(self: *Handler, req: *httpz.Request, res: *httpz.Response) !void {
+    try web_media.upload(self.io, self.media_root, req, res);
 }
 
 fn mediaAsset(self: *Handler, req: *httpz.Request, res: *httpz.Response) !void {
@@ -422,6 +438,11 @@ fn forbidden(res: *httpz.Response) void {
     res.body = "{\"error\":{\"code\":\"forbidden_origin\",\"message\":\"Request is not from the local Deez Web origin\"}}";
 }
 
+fn isMediaApiPath(path: []const u8) bool {
+    return std.mem.eql(u8, path, "/api/v1/media") or
+        std.mem.startsWith(u8, path, "/api/v1/media/");
+}
+
 fn isAllowedHost(value: ?[]const u8, port: u16) bool {
     const host = value orelse return false;
     const colon = std.mem.lastIndexOfScalar(u8, host, ':') orelse return false;
@@ -461,6 +482,13 @@ test "local web origin validation permits absent or exact same-origin headers" {
     try std.testing.expect(!isAllowedOrigin("http://127.0.0.1:49318", 49317));
     try std.testing.expect(!isAllowedOrigin("http://localhost:49317.evil.example", 49317));
     try std.testing.expect(!isAllowedOrigin("https://example.com", 49317));
+}
+
+test "media API path covers the collection and hash resources only" {
+    try std.testing.expect(isMediaApiPath("/api/v1/media"));
+    try std.testing.expect(isMediaApiPath("/api/v1/media/abc"));
+    try std.testing.expect(!isMediaApiPath("/api/v1/mediax"));
+    try std.testing.expect(!isMediaApiPath("/api/v1/notes/1"));
 }
 
 test "resource IDs normalize invalid unsigned input" {
