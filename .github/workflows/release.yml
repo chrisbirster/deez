@@ -57,7 +57,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: chrisbirster/deez-web
-          ref: 9fd0b7bc86f2eab4016cb673986b452325cf8d6c
+          ref: a636ee30011a0435f9b475fedc4fd98b49859351
           path: deez-web
       - uses: actions/setup-node@v4
         with:
