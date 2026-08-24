@@ -22,6 +22,15 @@ fn bindText(stmt: *c.sqlite3_stmt, index: c_int, value: []const u8) !void {
     if (c.sqlite3_bind_text(stmt, index, value.ptr, @intCast(value.len), null) != c.SQLITE_OK) return error.SqliteBindFailed;
 }
 
+fn requiredI64(document: []const u8, field: []const u8) !i64 {
+    const value = (try bongo.bson.Reader.get(document, field)) orelse return error.MissingField;
+    return switch (value) {
+        .int32 => |v| v,
+        .int64 => |v| v,
+        else => error.InvalidField,
+    };
+}
+
 pub fn link(
     store: *store_mod.Store,
     card_id: u64,
@@ -53,6 +62,24 @@ pub fn link(
     }
 }
 
+pub fn unlink(store: *store_mod.Store, card_id: u64) !void {
+    switch (store.*) {
+        .sqlite => |db| {
+            const stmt = try prepare(db, "DELETE FROM generated_cards WHERE card_id = ?1;");
+            defer _ = c.sqlite3_finalize(stmt);
+            try bindInt64(stmt, 1, @intCast(card_id));
+            if (c.sqlite3_step(stmt) != c.SQLITE_DONE) return error.SqliteStepFailed;
+        },
+        .mongodb => |*mongo| {
+            _ = try mongo.client.deleteOne(
+                mongo.client.databaseName(),
+                "generated_cards",
+                .{ ._id = @as(i64, @intCast(card_id)) },
+            );
+        },
+    }
+}
+
 pub fn cardIdForKey(store: *store_mod.Store, generation_key: []const u8) !?u64 {
     return switch (store.*) {
         .sqlite => |db| blk: {
@@ -79,6 +106,46 @@ pub fn cardIdForKey(store: *store_mod.Store, generation_key: []const u8) !?u64 {
             };
         },
     };
+}
+
+pub fn cardIdsForNote(
+    allocator: std.mem.Allocator,
+    store: *store_mod.Store,
+    note_id: content.NoteId,
+) ![]u64 {
+    switch (store.*) {
+        .sqlite => |db| {
+            const stmt = try prepare(db, "SELECT card_id FROM generated_cards WHERE note_id = ?1 ORDER BY card_id;");
+            defer _ = c.sqlite3_finalize(stmt);
+            try bindInt64(stmt, 1, @intCast(note_id));
+
+            var ids: std.ArrayList(u64) = .empty;
+            errdefer ids.deinit(allocator);
+            while (true) {
+                const result = c.sqlite3_step(stmt);
+                if (result == c.SQLITE_DONE) break;
+                if (result != c.SQLITE_ROW) return error.SqliteStepFailed;
+                try ids.append(allocator, @intCast(c.sqlite3_column_int64(stmt, 0)));
+            }
+            return ids.toOwnedSlice(allocator);
+        },
+        .mongodb => |*mongo| {
+            var cursor = try mongo.client.find(
+                mongo.client.databaseName(),
+                "generated_cards",
+                .{ .note_id = @as(i64, @intCast(note_id)) },
+                .{ .sort = .{ ._id = @as(i32, 1) } },
+            );
+            defer cursor.deinit();
+
+            var ids: std.ArrayList(u64) = .empty;
+            errdefer ids.deinit(allocator);
+            while (try cursor.next()) |document| {
+                try ids.append(allocator, @intCast(try requiredI64(document, "_id")));
+            }
+            return ids.toOwnedSlice(allocator);
+        },
+    }
 }
 
 fn fieldsJson(allocator: std.mem.Allocator, fields: []const content.FieldValue) ![]u8 {
@@ -138,6 +205,24 @@ pub fn updateNote(
                 false,
             );
             defer result.deinit();
+        },
+    }
+}
+
+pub fn deleteNote(store: *store_mod.Store, note_id: content.NoteId) !void {
+    switch (store.*) {
+        .sqlite => |db| {
+            const stmt = try prepare(db, "DELETE FROM notes WHERE id = ?1;");
+            defer _ = c.sqlite3_finalize(stmt);
+            try bindInt64(stmt, 1, @intCast(note_id));
+            if (c.sqlite3_step(stmt) != c.SQLITE_DONE) return error.SqliteStepFailed;
+        },
+        .mongodb => |*mongo| {
+            _ = try mongo.client.deleteOne(
+                mongo.client.databaseName(),
+                "notes",
+                .{ ._id = @as(i64, @intCast(note_id)) },
+            );
         },
     }
 }
