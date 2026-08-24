@@ -141,3 +141,44 @@ pub fn updateNote(
         },
     }
 }
+
+/// Remove logical-note and generated-card metadata without deleting physical
+/// cards. Callers must retire the note's cards first so immutable review and
+/// scheduler history remain preserved but the cards disappear from study.
+pub fn deleteNote(store: *store_mod.Store, note_id: content.NoteId) !void {
+    switch (store.*) {
+        .sqlite => |db| {
+            const stmt = try prepare(db, "DELETE FROM notes WHERE id = ?1;");
+            defer _ = c.sqlite3_finalize(stmt);
+            try bindInt64(stmt, 1, @intCast(note_id));
+            if (c.sqlite3_step(stmt) != c.SQLITE_DONE) return error.SqliteStepFailed;
+        },
+        .mongodb => |*mongo| {
+            var cursor = try mongo.client.find(
+                mongo.client.databaseName(),
+                "generated_cards",
+                .{ .note_id = @as(i64, @intCast(note_id)) },
+                .{ .sort = .{ ._id = @as(i32, 1) } },
+            );
+            defer cursor.deinit();
+            while (try cursor.next()) |document| {
+                const value = (try bongo.bson.Reader.get(document, "_id")) orelse return error.MissingField;
+                const card_id: i64 = switch (value) {
+                    .int32 => |v| v,
+                    .int64 => |v| v,
+                    else => return error.InvalidField,
+                };
+                _ = try mongo.client.deleteOne(
+                    mongo.client.databaseName(),
+                    "generated_cards",
+                    .{ ._id = card_id },
+                );
+            }
+            _ = try mongo.client.deleteOne(
+                mongo.client.databaseName(),
+                "notes",
+                .{ ._id = @as(i64, @intCast(note_id)) },
+            );
+        },
+    }
+}

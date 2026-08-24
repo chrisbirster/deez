@@ -3,6 +3,7 @@ const httpz = @import("httpz");
 const build_options = @import("build_options");
 const content = @import("content.zig");
 const storage = @import("storage/root.zig");
+const web_notes = @import("web_notes.zig");
 
 const Io = std.Io;
 
@@ -132,7 +133,11 @@ pub fn run(init: std.process.Init, store: *storage.Store, options: Options) !voi
     router.get("/api/v1/decks", decks, .{});
     router.get("/api/v1/decks/:id", deck, .{});
     router.get("/api/v1/decks/:id/notes", deckNotes, .{});
+    router.post("/api/v1/decks/:id/notes", createNote, .{});
     router.get("/api/v1/notes/:id", note, .{});
+    router.patch("/api/v1/notes/:id", updateNote, .{});
+    router.delete("/api/v1/notes/:id", deleteNote, .{});
+    router.post("/api/v1/notes/preview", previewNote, .{});
 
     std.debug.print("Deez Web API listening on http://127.0.0.1:{d}/\n", .{options.port});
     try server.listen();
@@ -273,6 +278,22 @@ fn note(self: *Handler, req: *httpz.Request, res: *httpz.Response) !void {
         .created_at_ms = owned.created_at_ms,
         .updated_at_ms = owned.updated_at_ms,
     }, .{});
+}
+
+fn createNote(self: *Handler, req: *httpz.Request, res: *httpz.Response) !void {
+    try web_notes.createNote(self.store, self.io, req, res);
+}
+
+fn updateNote(self: *Handler, req: *httpz.Request, res: *httpz.Response) !void {
+    try web_notes.updateNote(self.store, self.io, req, res);
+}
+
+fn deleteNote(self: *Handler, req: *httpz.Request, res: *httpz.Response) !void {
+    try web_notes.deleteNote(self.store, self.io, req, res);
+}
+
+fn previewNote(_: *Handler, req: *httpz.Request, res: *httpz.Response) !void {
+    try web_notes.previewNote(req, res);
 }
 
 fn parseRouteId(req: *httpz.Request, res: *httpz.Response, name: []const u8) ?u64 {
