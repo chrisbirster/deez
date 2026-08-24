@@ -1,5 +1,6 @@
 const std = @import("std");
 const httpz = @import("httpz");
+const deez_build_options = @import("deez_build_options");
 
 const config = @import("config.zig");
 const content = @import("content.zig");
@@ -19,7 +20,7 @@ pub const help_text =
     \\Binds to 127.0.0.1 only. The default port is 5882.
 ;
 
-const version = std.mem.trim(u8, @embedFile("../VERSION"), " \t\r\n");
+const version = deez_build_options.version;
 
 const App = struct {
     allocator: std.mem.Allocator,
