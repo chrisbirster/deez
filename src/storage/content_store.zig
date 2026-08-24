@@ -5,6 +5,15 @@ const store_mod = @import("store.zig");
 const sqlite_content = @import("sqlite_content.zig");
 const mongodb_content = @import("mongodb_content.zig");
 
+pub const OwnedDeckNote = struct {
+    note: content.OwnedNote,
+    card_count: usize,
+
+    pub fn deinit(self: OwnedDeckNote, allocator: std.mem.Allocator) void {
+        self.note.deinit(allocator);
+    }
+};
+
 pub const ContentStore = struct {
     store: *store_mod.Store,
 
@@ -71,6 +80,65 @@ pub const ContentStore = struct {
         };
     }
 
+    /// Return logical notes whose generated cards belong to `deck_id`.
+    ///
+    /// The content schema intentionally does not duplicate deck ownership on a
+    /// note. A note belongs to a deck through its generated cards, so this
+    /// operation derives membership through the existing Store/CardSource
+    /// abstractions and works identically for SQLite and MongoDB.
+    /// Legacy cards without Content Model v2 metadata are ignored.
+    pub fn notesForDeck(
+        self: ContentStore,
+        allocator: std.mem.Allocator,
+        deck_id: u64,
+    ) ![]OwnedDeckNote {
+        const cards = try self.store.cards(allocator, deck_id);
+        defer {
+            for (cards) |card| card.deinit(allocator);
+            allocator.free(cards);
+        }
+
+        var notes: std.ArrayList(OwnedDeckNote) = .empty;
+        errdefer {
+            for (notes.items) |entry| entry.deinit(allocator);
+            notes.deinit(allocator);
+        }
+
+        for (cards) |card| {
+            const source = (try self.cardSource(allocator, card.id)) orelse continue;
+            defer source.deinit(allocator);
+
+            var existing_index: ?usize = null;
+            for (notes.items, 0..) |entry, index| {
+                if (entry.note.id == source.note_id) {
+                    existing_index = index;
+                    break;
+                }
+            }
+
+            if (existing_index) |index| {
+                notes.items[index].card_count += 1;
+                continue;
+            }
+
+            const note = (try self.getNote(allocator, source.note_id)) orelse return error.NoteNotFound;
+            errdefer note.deinit(allocator);
+            try notes.append(allocator, .{
+                .note = note,
+                .card_count = 1,
+            });
+        }
+
+        std.mem.sort(OwnedDeckNote, notes.items, {}, struct {
+            fn lessThan(_: void, left: OwnedDeckNote, right: OwnedDeckNote) bool {
+                if (left.note.updated_at_ms == right.note.updated_at_ms) return left.note.id < right.note.id;
+                return left.note.updated_at_ms > right.note.updated_at_ms;
+            }
+        }.lessThan);
+
+        return notes.toOwnedSlice(allocator);
+    }
+
     pub fn cardSource(
         self: ContentStore,
         allocator: std.mem.Allocator,
@@ -98,4 +166,48 @@ test "ContentStore adopts an existing SQLite card without changing its id" {
     defer source.deinit(std.testing.allocator);
     try std.testing.expectEqual(note_id, source.note_id);
     try std.testing.expectEqual(card_id, @as(u64, card_id));
+}
+
+test "notesForDeck deduplicates generated cards into logical notes" {
+    const sqlite = @import("sqlite.zig");
+    const note_type_store = @import("note_type_store.zig");
+    const generated_card_store = @import("generated_card_store.zig");
+
+    var db = try sqlite.Db.open(":memory:");
+    defer db.close();
+    try db.migrate();
+    var store: store_mod.Store = .{ .sqlite = &db };
+    const content_store = ContentStore.init(&store);
+    const deck_id = try store.createDeck("reverse", 0);
+
+    try note_type_store.ensure(std.testing.allocator, &store, content.basic_reverse_note_type, 0);
+    const fields = [_]content.FieldValue{
+        .{ .ordinal = 0, .value = "France" },
+        .{ .ordinal = 1, .value = "Paris" },
+    };
+    const note_id = try content_store.createNote(
+        std.testing.allocator,
+        content.basic_reverse_note_type.id,
+        &fields,
+        "[\"geography\"]",
+        10,
+    );
+    const forward = try store.createCard(deck_id, "France", "Paris", 10);
+    const reverse = try store.createCard(deck_id, "Paris", "France", 10);
+    const forward_key = try content.generationKey(std.testing.allocator, note_id, 0);
+    defer std.testing.allocator.free(forward_key);
+    try generated_card_store.link(&store, forward, note_id, 0, forward_key);
+    const reverse_key = try content.generationKey(std.testing.allocator, note_id, 1);
+    defer std.testing.allocator.free(reverse_key);
+    try generated_card_store.link(&store, reverse, note_id, 1, reverse_key);
+
+    const notes = try content_store.notesForDeck(std.testing.allocator, deck_id);
+    defer {
+        for (notes) |entry| entry.deinit(std.testing.allocator);
+        std.testing.allocator.free(notes);
+    }
+    try std.testing.expectEqual(@as(usize, 1), notes.len);
+    try std.testing.expectEqual(note_id, notes[0].note.id);
+    try std.testing.expectEqual(@as(usize, 2), notes[0].card_count);
+    try std.testing.expectEqualStrings("[\"geography\"]", notes[0].note.tags_json);
 }
