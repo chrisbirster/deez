@@ -3,11 +3,15 @@ set -euo pipefail
 
 tmp=$(mktemp -d)
 port=49319
-api="http://127.0.0.1:${port}/api/v1"
+base="http://127.0.0.1:${port}"
+api="$base/api/v1"
 export HOME="$tmp/home"
 export DEEZ_STORAGE=sqlite
 export DEEZ_DB="$tmp/deez.db"
-mkdir -p "$HOME"
+mkdir -p "$HOME" "$tmp/web/assets"
+printf '<!doctype html><title>Deez Web Smoke</title><div id="app">deez-spa-smoke</div>\n' >"$tmp/web/index.html"
+printf 'console.log("deez-asset-smoke");\n' >"$tmp/web/assets/app.js"
+printf 'must-not-be-served\n' >"$tmp/secret"
 
 cleanup() {
   if [[ -n "${server_pid:-}" ]]; then
@@ -19,7 +23,7 @@ cleanup() {
 trap cleanup EXIT
 
 ./zig-out/bin/deez deck add "Web Smoke" >/dev/null
-./zig-out/bin/deez web --port "$port" >"$tmp/web.log" 2>&1 &
+./zig-out/bin/deez web --port "$port" --web-root "$tmp/web" >"$tmp/web.log" 2>&1 &
 server_pid=$!
 
 ready=0
@@ -34,6 +38,23 @@ if [[ "$ready" != 1 ]]; then
   cat "$tmp/web.log" >&2
   exit 1
 fi
+
+# Static app serving and Solid Router fallback.
+curl -fsS "$base/" | grep -q 'deez-spa-smoke'
+curl -fsS "$base/decks/1" | grep -q 'deez-spa-smoke'
+curl -fsS -D "$tmp/asset-headers.txt" "$base/assets/app.js" -o "$tmp/app.js"
+grep -q 'deez-asset-smoke' "$tmp/app.js"
+grep -qi '^content-type: text/javascript' "$tmp/asset-headers.txt"
+grep -qi '^cache-control: public, max-age=31536000, immutable' "$tmp/asset-headers.txt"
+
+missing_asset_code=$(curl -sS -o "$tmp/missing-asset.json" -w '%{http_code}' "$base/assets/missing.js")
+test "$missing_asset_code" = "404"
+unsafe_code=$(curl --path-as-is -sS -o "$tmp/unsafe.json" -w '%{http_code}' "$base/../secret")
+test "$unsafe_code" = "404"
+test "$(cat "$tmp/unsafe.json")" != 'must-not-be-served'
+
+static_forbidden_code=$(curl -sS -o "$tmp/static-forbidden.json" -w '%{http_code}' -H 'Origin: https://example.com' "$base/")
+test "$static_forbidden_code" = "403"
 
 python3 - "$tmp/health.json" <<'PY'
 import json, sys
@@ -156,4 +177,4 @@ assert deck["card_count"] == 0, deck
 assert deck["due_count"] == 0, deck
 PY
 
-echo "Deez Web API smoke passed"
+echo "Deez Web app/API smoke passed"
