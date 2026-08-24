@@ -27,6 +27,7 @@ pub const nut = @import("nut.zig");
 pub const notes_cli = @import("notes_cli.zig");
 pub const backup_cli = @import("backup_cli.zig");
 pub const app = @import("app.zig");
+pub const server = @import("server.zig");
 pub const interchange = @import("interchange.zig");
 pub const interchange_import = @import("interchange_import.zig");
 pub const interchange_mongodb = @import("interchange_mongodb.zig");

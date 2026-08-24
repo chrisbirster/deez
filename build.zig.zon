@@ -12,10 +12,15 @@
             .url = "git+https://github.com/chrisbirster/thrawn#277da65af6d839c37154813e01fb0b0073737ea3",
             .hash = "thrawn-0.2.0-8rln6YLLAQC-GZfHMhQNtEkk5xbrEHoAdj_Hsk01BMFI",
         },
+        .httpz = .{
+            .url = "git+https://github.com/karlseguin/http.zig?ref=master#52eb187cff75e168316b44480cd9f0fae26a1c5e",
+            .hash = "httpz-0.0.0-PNVzrL3oCADwWVoScHt1fFGTRyZMJ_FYa9reFvHhqq8Y",
+        },
     },
     .paths = .{
         "build.zig",
         "build.zig.zon",
+        "VERSION",
         "src",
     },
 }

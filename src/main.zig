@@ -52,6 +52,11 @@ pub fn main(init: std.process.Init) !void {
     const args = try arena.alloc([]const u8, raw_args.len);
     for (raw_args, 0..) |arg, index| args[index] = arg;
 
+    if (deez.server.isCommand(args)) {
+        deez.server.runCommand(init, args) catch |err| printErrorAndExit(init, err, .general);
+        return;
+    }
+
     const route = deez.thrawn_cli.parse(arena, args) catch |err| {
         printErrorAndExit(init, err, deez.thrawn_cli.errorHelp(args));
     };
