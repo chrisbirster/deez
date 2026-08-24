@@ -4,6 +4,16 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    const version_file = std.Io.Dir.cwd().readFileAlloc(
+        b.graph.io,
+        "VERSION",
+        b.allocator,
+        .limited(128),
+    ) catch @panic("failed to read VERSION");
+    const version = std.mem.trim(u8, version_file, " \t\r\n");
+    const build_options = b.addOptions();
+    build_options.addOption([]const u8, "version", version);
+
     const bongo_dependency = b.dependency("bongo", .{
         .target = target,
         .optimize = optimize,
@@ -22,6 +32,7 @@ pub fn build(b: *std.Build) void {
     mod.linkSystemLibrary("sqlite3", .{});
     mod.addImport("bongo", bongo_dependency.module("bongo"));
     mod.addImport("httpz", httpz_dependency.module("httpz"));
+    mod.addOptions("build_options", build_options);
 
     const exe = b.addExecutable(.{
         .name = "deez",

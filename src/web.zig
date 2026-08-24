@@ -1,10 +1,11 @@
 const std = @import("std");
 const httpz = @import("httpz");
+const build_options = @import("build_options");
 const content = @import("content.zig");
 
 pub const default_port: u16 = 49317;
 pub const api_version = "v1";
-pub const version = std.mem.trim(u8, @embedFile("../VERSION"), " \t\r\n");
+pub const version = build_options.version;
 
 pub const Options = struct {
     port: u16 = default_port,
