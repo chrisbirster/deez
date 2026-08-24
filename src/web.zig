@@ -172,7 +172,7 @@ pub fn run(init: std.process.Init, store: *storage.Store, options: Options) !voi
     if (options.web_root != null and options.open_browser) {
         const listen_thread = try server.listenInNewThread();
         const url = try std.fmt.allocPrint(init.arena.allocator(), "http://127.0.0.1:{d}/", .{options.port});
-        browser.openDefault(init.gpa, url) catch |err| {
+        browser.openDefault(init.io, url) catch |err| {
             std.log.warn("unable to open Deez Web in the default browser: {}", .{err});
         };
         listen_thread.join();
