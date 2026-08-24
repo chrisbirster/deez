@@ -244,9 +244,7 @@ pub fn createNote(
         nowMs(io),
     ) catch |err| {
         switch (err) {
-            error.InvalidFieldCount, error.EmptyText, error.InvalidCloze, error.ClozeRequired,
-            error.InvalidInteractionText, error.NotEnoughChoices, error.UnknownChoiceId,
-            error.CorrectChoiceRequired, error.DuplicateChoiceId, error.DuplicateCorrectChoiceId => {
+            error.InvalidFieldCount, error.EmptyText, error.InvalidCloze, error.ClozeRequired, error.InvalidInteractionText, error.NotEnoughChoices, error.UnknownChoiceId, error.CorrectChoiceRequired, error.DuplicateChoiceId, error.DuplicateCorrectChoiceId => {
                 try jsonError(res, 400, "invalid_note", "Note fields are invalid for this note type");
                 return;
             },
@@ -289,9 +287,7 @@ pub fn updateNote(
         nowMs(io),
     ) catch |err| {
         switch (err) {
-            error.InvalidFieldCount, error.EmptyText, error.InvalidCloze, error.ClozeRequired,
-            error.InvalidInteractionText, error.NotEnoughChoices, error.UnknownChoiceId,
-            error.CorrectChoiceRequired, error.DuplicateChoiceId, error.DuplicateCorrectChoiceId => {
+            error.InvalidFieldCount, error.EmptyText, error.InvalidCloze, error.ClozeRequired, error.InvalidInteractionText, error.NotEnoughChoices, error.UnknownChoiceId, error.CorrectChoiceRequired, error.DuplicateChoiceId, error.DuplicateCorrectChoiceId => {
                 try jsonError(res, 400, "invalid_note", "Note fields are invalid for this note type");
                 return;
             },
@@ -329,9 +325,7 @@ pub fn previewNote(
     };
     const drafts = card_types.renderedDrafts(res.arena, kind, input.fields, .html) catch |err| {
         switch (err) {
-            error.InvalidFieldCount, error.EmptyText, error.InvalidCloze, error.ClozeRequired,
-            error.InvalidInteractionText, error.NotEnoughChoices, error.UnknownChoiceId,
-            error.CorrectChoiceRequired, error.DuplicateChoiceId, error.DuplicateCorrectChoiceId => {
+            error.InvalidFieldCount, error.EmptyText, error.InvalidCloze, error.ClozeRequired, error.InvalidInteractionText, error.NotEnoughChoices, error.UnknownChoiceId, error.CorrectChoiceRequired, error.DuplicateChoiceId, error.DuplicateCorrectChoiceId => {
                 try jsonError(res, 400, "invalid_note", "Note fields are invalid for this note type");
                 return;
             },

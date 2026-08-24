@@ -388,6 +388,7 @@ pub const Store = union(enum) {
         self: *Store,
         allocator: Allocator,
         owned: []catalog_mod.OwnedDueCard,
+        limit: usize,
     ) ![]catalog_mod.OwnedDueCard {
         var active: std.ArrayList(catalog_mod.OwnedDueCard) = .empty;
         errdefer {
@@ -404,11 +405,13 @@ pub const Store = union(enum) {
             const card = owned[index];
             if (try self.isCardRetired(card.id)) {
                 card.deinit(allocator);
-            } else {
+            } else if (active.items.len < limit) {
                 active.append(allocator, card) catch |err| {
                     card.deinit(allocator);
                     return err;
                 };
+            } else {
+                card.deinit(allocator);
             }
             index += 1;
         }
@@ -423,11 +426,12 @@ pub const Store = union(enum) {
         now_ms: time.TimestampMs,
         limit: usize,
     ) ![]catalog_mod.OwnedDueCard {
+        const backend_limit = if (limit == 0) 0 else all_due_limit;
         const owned = switch (self.*) {
-            .sqlite => |db| try (catalog_mod.Catalog{ .db = db }).dueCards(allocator, deck_id, now_ms, limit),
-            .mongodb => |*store| try store.dueCards(allocator, deck_id, now_ms, limit),
+            .sqlite => |db| try (catalog_mod.Catalog{ .db = db }).dueCards(allocator, deck_id, now_ms, backend_limit),
+            .mongodb => |*store| try store.dueCards(allocator, deck_id, now_ms, backend_limit),
         };
-        return self.activeDueCardsFromOwned(allocator, owned);
+        return self.activeDueCardsFromOwned(allocator, owned, limit);
     }
 
     pub fn decks(
@@ -531,8 +535,8 @@ test "retired cards are hidden from active list due queue and counts" {
     try db.migrate();
     var store: Store = .{ .sqlite = &db };
     const deck_id = try store.createDeck("retired", 0);
-    const active_id = try store.createCard(deck_id, "active", "a", 0);
     const retired_id = try store.createCard(deck_id, "retired", "r", 0);
+    const active_id = try store.createCard(deck_id, "active", "a", 0);
     try store.retireCard(retired_id, 10);
 
     const active = try store.cards(std.testing.allocator, deck_id);
@@ -550,7 +554,7 @@ test "retired cards are hidden from active list due queue and counts" {
     }
     try std.testing.expectEqual(@as(usize, 2), all.len);
 
-    const due = try store.dueCards(std.testing.allocator, deck_id, 0, 10);
+    const due = try store.dueCards(std.testing.allocator, deck_id, 0, 1);
     defer {
         for (due) |card| card.deinit(std.testing.allocator);
         std.testing.allocator.free(due);
