@@ -8,6 +8,7 @@ const catalog_mod = @import("catalog.zig");
 const report_mod = @import("report.zig");
 const mongodb = @import("mongodb.zig");
 const mongodb_cards = @import("mongodb_cards.zig");
+const card_lifecycle = @import("card_lifecycle.zig");
 
 const Allocator = std.mem.Allocator;
 
@@ -64,12 +65,13 @@ pub const Store = union(enum) {
     }
 
     pub fn deleteDeck(self: *Store, id: card_mod.DeckId) !void {
-        const deck_cards = try self.cards(std.heap.page_allocator, id);
+        const deck_cards = try self.allCards(std.heap.page_allocator, id);
         defer {
             for (deck_cards) |card| card.deinit(std.heap.page_allocator);
             std.heap.page_allocator.free(deck_cards);
         }
         for (deck_cards) |card| try self.ensureCardHasNoReviewHistory(card.id);
+        for (deck_cards) |card| try self.restoreCard(card.id);
 
         switch (self.*) {
             .sqlite => |db| try db.deleteDeck(id),
@@ -101,7 +103,7 @@ pub const Store = union(enum) {
         };
     }
 
-    pub fn cards(
+    pub fn allCards(
         self: *Store,
         allocator: Allocator,
         deck_id: card_mod.DeckId,
@@ -110,6 +112,46 @@ pub const Store = union(enum) {
             .sqlite => |db| sqlite_cards.list(db, allocator, deck_id),
             .mongodb => |*store| mongodb_cards.list(store, allocator, deck_id),
         };
+    }
+
+    fn activeCardsFromOwned(
+        self: *Store,
+        allocator: Allocator,
+        owned: []sqlite.OwnedCard,
+    ) ![]sqlite.OwnedCard {
+        var active: std.ArrayList(sqlite.OwnedCard) = .empty;
+        errdefer {
+            for (active.items) |card| card.deinit(allocator);
+            active.deinit(allocator);
+        }
+
+        var index: usize = 0;
+        errdefer {
+            for (owned[index..]) |card| card.deinit(allocator);
+            allocator.free(owned);
+        }
+        while (index < owned.len) {
+            const card = owned[index];
+            if (try self.isCardRetired(card.id)) {
+                card.deinit(allocator);
+            } else {
+                active.append(allocator, card) catch |err| {
+                    card.deinit(allocator);
+                    return err;
+                };
+            }
+            index += 1;
+        }
+        allocator.free(owned);
+        return active.toOwnedSlice(allocator);
+    }
+
+    pub fn cards(
+        self: *Store,
+        allocator: Allocator,
+        deck_id: card_mod.DeckId,
+    ) ![]sqlite.OwnedCard {
+        return self.activeCardsFromOwned(allocator, try self.allCards(allocator, deck_id));
     }
 
     pub fn updateCard(
@@ -124,8 +166,30 @@ pub const Store = union(enum) {
         }
     }
 
+    pub fn retireCard(self: *Store, id: card_mod.CardId, retired_at_ms: time.TimestampMs) !void {
+        switch (self.*) {
+            .sqlite => |db| try card_lifecycle.sqliteRetire(db, id, retired_at_ms),
+            .mongodb => |*store| try card_lifecycle.mongoRetire(store, id, retired_at_ms),
+        }
+    }
+
+    pub fn restoreCard(self: *Store, id: card_mod.CardId) !void {
+        switch (self.*) {
+            .sqlite => |db| try card_lifecycle.sqliteRestore(db, id),
+            .mongodb => |*store| try card_lifecycle.mongoRestore(store, id),
+        }
+    }
+
+    pub fn isCardRetired(self: *Store, id: card_mod.CardId) !bool {
+        return switch (self.*) {
+            .sqlite => |db| card_lifecycle.sqliteIsRetired(db, id),
+            .mongodb => |*store| card_lifecycle.mongoIsRetired(store, id),
+        };
+    }
+
     pub fn deleteCard(self: *Store, id: card_mod.CardId) !void {
         try self.ensureCardHasNoReviewHistory(id);
+        try self.restoreCard(id);
         switch (self.*) {
             .sqlite => |db| try db.deleteCard(id),
             .mongodb => |*store| try store.deleteCard(id),
@@ -319,6 +383,38 @@ pub const Store = union(enum) {
         };
     }
 
+    fn activeDueCardsFromOwned(
+        self: *Store,
+        allocator: Allocator,
+        owned: []catalog_mod.OwnedDueCard,
+    ) ![]catalog_mod.OwnedDueCard {
+        var active: std.ArrayList(catalog_mod.OwnedDueCard) = .empty;
+        errdefer {
+            for (active.items) |card| card.deinit(allocator);
+            active.deinit(allocator);
+        }
+
+        var index: usize = 0;
+        errdefer {
+            for (owned[index..]) |card| card.deinit(allocator);
+            allocator.free(owned);
+        }
+        while (index < owned.len) {
+            const card = owned[index];
+            if (try self.isCardRetired(card.id)) {
+                card.deinit(allocator);
+            } else {
+                active.append(allocator, card) catch |err| {
+                    card.deinit(allocator);
+                    return err;
+                };
+            }
+            index += 1;
+        }
+        allocator.free(owned);
+        return active.toOwnedSlice(allocator);
+    }
+
     pub fn dueCards(
         self: *Store,
         allocator: Allocator,
@@ -326,10 +422,11 @@ pub const Store = union(enum) {
         now_ms: time.TimestampMs,
         limit: usize,
     ) ![]catalog_mod.OwnedDueCard {
-        return switch (self.*) {
-            .sqlite => |db| (catalog_mod.Catalog{ .db = db }).dueCards(allocator, deck_id, now_ms, limit),
-            .mongodb => |*store| store.dueCards(allocator, deck_id, now_ms, limit),
+        const owned = switch (self.*) {
+            .sqlite => |db| try (catalog_mod.Catalog{ .db = db }).dueCards(allocator, deck_id, now_ms, limit),
+            .mongodb => |*store| try store.dueCards(allocator, deck_id, now_ms, limit),
         };
+        return self.activeDueCardsFromOwned(allocator, owned);
     }
 
     pub fn decks(
@@ -337,10 +434,30 @@ pub const Store = union(enum) {
         allocator: Allocator,
         now_ms: time.TimestampMs,
     ) ![]report_mod.DeckSummary {
-        return switch (self.*) {
-            .sqlite => |db| (report_mod.Report{ .db = db }).decks(allocator, now_ms),
-            .mongodb => |*store| store.decks(allocator, now_ms),
+        const summaries = switch (self.*) {
+            .sqlite => |db| try (report_mod.Report{ .db = db }).decks(allocator, now_ms),
+            .mongodb => |*store| try store.decks(allocator, now_ms),
         };
+        errdefer {
+            for (summaries) |summary| summary.deinit(allocator);
+            allocator.free(summaries);
+        }
+
+        for (summaries) |*summary| {
+            const deck_cards = try self.cards(allocator, summary.id);
+            defer {
+                for (deck_cards) |card| card.deinit(allocator);
+                allocator.free(deck_cards);
+            }
+            const due = try self.dueCards(allocator, summary.id, now_ms, std.math.maxInt(usize));
+            defer {
+                for (due) |card| card.deinit(allocator);
+                allocator.free(due);
+            }
+            summary.card_count = deck_cards.len;
+            summary.due_count = due.len;
+        }
+        return summaries;
     }
 
     pub fn stats(
@@ -348,10 +465,39 @@ pub const Store = union(enum) {
         now_ms: time.TimestampMs,
         deck_id: ?card_mod.DeckId,
     ) !report_mod.Stats {
-        return switch (self.*) {
-            .sqlite => |db| (report_mod.Report{ .db = db }).stats(now_ms, deck_id),
-            .mongodb => |*store| store.stats(now_ms, deck_id),
+        var result = switch (self.*) {
+            .sqlite => |db| try (report_mod.Report{ .db = db }).stats(now_ms, deck_id),
+            .mongodb => |*store| try store.stats(now_ms, deck_id),
         };
+
+        if (deck_id) |id| {
+            const deck_cards = try self.cards(std.heap.page_allocator, id);
+            defer {
+                for (deck_cards) |card| card.deinit(std.heap.page_allocator);
+                std.heap.page_allocator.free(deck_cards);
+            }
+            const due = try self.dueCards(std.heap.page_allocator, id, now_ms, std.math.maxInt(usize));
+            defer {
+                for (due) |card| card.deinit(std.heap.page_allocator);
+                std.heap.page_allocator.free(due);
+            }
+            result.card_count = deck_cards.len;
+            result.due_count = due.len;
+            return result;
+        }
+
+        const summaries = try self.decks(std.heap.page_allocator, now_ms);
+        defer {
+            for (summaries) |summary| summary.deinit(std.heap.page_allocator);
+            std.heap.page_allocator.free(summaries);
+        }
+        result.card_count = 0;
+        result.due_count = 0;
+        for (summaries) |summary| {
+            result.card_count += summary.card_count;
+            result.due_count += summary.due_count;
+        }
+        return result;
     }
 
     pub fn histories(
@@ -376,4 +522,45 @@ test "SQLite remains usable through Store" {
     const card = (try store.getCard(std.testing.allocator, card_id)).?;
     defer card.deinit(std.testing.allocator);
     try std.testing.expectEqual(deck_id, card.deck_id);
+}
+
+test "retired cards are hidden from active list due queue and counts" {
+    var db = try sqlite.Db.open(":memory:");
+    defer db.close();
+    try db.migrate();
+    var store: Store = .{ .sqlite = &db };
+    const deck_id = try store.createDeck("retired", 0);
+    const active_id = try store.createCard(deck_id, "active", "a", 0);
+    const retired_id = try store.createCard(deck_id, "retired", "r", 0);
+    try store.retireCard(retired_id, 10);
+
+    const active = try store.cards(std.testing.allocator, deck_id);
+    defer {
+        for (active) |card| card.deinit(std.testing.allocator);
+        std.testing.allocator.free(active);
+    }
+    try std.testing.expectEqual(@as(usize, 1), active.len);
+    try std.testing.expectEqual(active_id, active[0].id);
+
+    const all = try store.allCards(std.testing.allocator, deck_id);
+    defer {
+        for (all) |card| card.deinit(std.testing.allocator);
+        std.testing.allocator.free(all);
+    }
+    try std.testing.expectEqual(@as(usize, 2), all.len);
+
+    const due = try store.dueCards(std.testing.allocator, deck_id, 0, 10);
+    defer {
+        for (due) |card| card.deinit(std.testing.allocator);
+        std.testing.allocator.free(due);
+    }
+    try std.testing.expectEqual(@as(usize, 1), due.len);
+    try std.testing.expectEqual(active_id, due[0].id);
+
+    const counts = try store.stats(0, deck_id);
+    try std.testing.expectEqual(@as(usize, 1), counts.card_count);
+    try std.testing.expectEqual(@as(usize, 1), counts.due_count);
+
+    try store.restoreCard(retired_id);
+    try std.testing.expect(!try store.isCardRetired(retired_id));
 }
