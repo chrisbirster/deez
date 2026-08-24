@@ -131,6 +131,38 @@ assert notes[0]["id"] == sys.argv[2], notes
 assert notes[0]["card_count"] == 2, notes
 PY
 
+curl -fsS "$api/decks/1/cards" >"$tmp/cards.json"
+forward_card_id=$(python3 - "$tmp/cards.json" "$note_id" <<'PY'
+import json, sys
+with open(sys.argv[1]) as f:
+    cards = json.load(f)
+assert len(cards) == 2, cards
+assert all(card["deck_id"] == "1" for card in cards), cards
+assert all(card["note_id"] == sys.argv[2] for card in cards), cards
+by_generation = {(card["generation"]["kind"], card["generation"]["ordinal"]): card for card in cards}
+assert set(by_generation) == {("template", 0), ("template", 1)}, cards
+assert by_generation[("template", 0)]["front"] == "France", cards
+assert by_generation[("template", 1)]["front"] == "Paris", cards
+print(by_generation[("template", 0)]["id"])
+PY
+)
+
+curl -fsS "$api/cards/$forward_card_id" >"$tmp/card.json"
+python3 - "$tmp/card.json" "$forward_card_id" "$note_id" <<'PY'
+import json, sys
+with open(sys.argv[1]) as f:
+    card = json.load(f)
+assert card["id"] == sys.argv[2], card
+assert card["deck_id"] == "1", card
+assert card["note_id"] == sys.argv[3], card
+assert card["note_type"] == "basic-reverse", card
+assert card["generation"] == {"kind": "template", "ordinal": 0}, card
+assert card["rendered"]["front"] == "France", card
+assert "Paris" in card["rendered"]["back"], card
+assert card["rendered"]["interaction"]["type"] == "reveal", card
+assert card["review_count"] == 0, card
+PY
+
 curl -fsS \
   -X PATCH \
   -H 'Content-Type: application/json' \
@@ -143,6 +175,16 @@ with open(sys.argv[1]) as f:
 assert note["id"] == sys.argv[2], note
 assert note["fields"] == ["Capital of France", "Paris"], note
 assert note["tags"] == ["geo", "edited"], note
+PY
+
+curl -fsS "$api/cards/$forward_card_id" >"$tmp/card-after-update.json"
+python3 - "$tmp/card-after-update.json" "$forward_card_id" <<'PY'
+import json, sys
+with open(sys.argv[1]) as f:
+    card = json.load(f)
+assert card["id"] == sys.argv[2], card
+assert card["rendered"]["front"] == "Capital of France", card
+assert "Paris" in card["rendered"]["back"], card
 PY
 
 curl -fsS "$api/decks/1" >"$tmp/deck.json"
@@ -165,6 +207,23 @@ import json, sys
 with open(sys.argv[1]) as f:
     body = json.load(f)
 assert body["error"]["code"] == "note_not_found", body
+PY
+
+missing_card_code=$(curl -sS -o "$tmp/missing-card.json" -w '%{http_code}' "$api/cards/$forward_card_id")
+test "$missing_card_code" = "404"
+python3 - "$tmp/missing-card.json" <<'PY'
+import json, sys
+with open(sys.argv[1]) as f:
+    body = json.load(f)
+assert body["error"]["code"] == "card_not_found", body
+PY
+
+curl -fsS "$api/decks/1/cards" >"$tmp/cards-after-delete.json"
+python3 - "$tmp/cards-after-delete.json" <<'PY'
+import json, sys
+with open(sys.argv[1]) as f:
+    cards = json.load(f)
+assert cards == [], cards
 PY
 
 curl -fsS "$api/decks/1" >"$tmp/deck-after-delete.json"
