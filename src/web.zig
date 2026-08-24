@@ -7,6 +7,7 @@ const storage = @import("storage/root.zig");
 const web_assets = @import("web_assets.zig");
 const web_cards = @import("web_cards.zig");
 const web_notes = @import("web_notes.zig");
+const web_study = @import("web_study.zig");
 
 const Io = std.Io;
 
@@ -160,11 +161,14 @@ pub fn run(init: std.process.Init, store: *storage.Store, options: Options) !voi
     router.get("/api/v1/decks/:id/notes", deckNotes, .{});
     router.post("/api/v1/decks/:id/notes", createNote, .{});
     router.get("/api/v1/decks/:id/cards", deckCards, .{});
+    router.get("/api/v1/decks/:id/study/next", studyNext, .{});
     router.get("/api/v1/notes/:id", note, .{});
     router.patch("/api/v1/notes/:id", updateNote, .{});
     router.delete("/api/v1/notes/:id", deleteNote, .{});
     router.post("/api/v1/notes/preview", previewNote, .{});
     router.get("/api/v1/cards/:id", card, .{});
+    router.get("/api/v1/cards/:id/study/preview", studyPreview, .{});
+    router.post("/api/v1/cards/:id/reviews", studyReview, .{});
 
     if (options.web_root) |root| {
         std.debug.print("Deez Web listening on http://127.0.0.1:{d}/ (assets: {s})\n", .{ options.port, root });
@@ -295,6 +299,10 @@ fn deckCards(self: *Handler, req: *httpz.Request, res: *httpz.Response) !void {
     try web_cards.deckCards(self.store, req, res);
 }
 
+fn studyNext(self: *Handler, req: *httpz.Request, res: *httpz.Response) !void {
+    try web_study.next(self.store, self.io, req, res);
+}
+
 fn note(self: *Handler, req: *httpz.Request, res: *httpz.Response) !void {
     const note_id = parseRouteId(req, res, "id") orelse return;
     const owned = (try storage.ContentStore.init(self.store).getNote(res.arena, note_id)) orelse {
@@ -344,6 +352,14 @@ fn previewNote(_: *Handler, req: *httpz.Request, res: *httpz.Response) !void {
 
 fn card(self: *Handler, req: *httpz.Request, res: *httpz.Response) !void {
     try web_cards.card(self.store, req, res);
+}
+
+fn studyPreview(self: *Handler, req: *httpz.Request, res: *httpz.Response) !void {
+    try web_study.preview(self.store, self.io, req, res);
+}
+
+fn studyReview(self: *Handler, req: *httpz.Request, res: *httpz.Response) !void {
+    try web_study.review(self.store, self.io, req, res);
 }
 
 fn parseRouteId(req: *httpz.Request, res: *httpz.Response, name: []const u8) ?u64 {
