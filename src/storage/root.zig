@@ -4,6 +4,7 @@ pub const schema = @import("schema.zig");
 pub const sqlite = @import("sqlite.zig");
 pub const mongodb = @import("mongodb.zig");
 pub const store = @import("store.zig");
+pub const card_lifecycle = @import("card_lifecycle.zig");
 pub const sqlite_content = @import("sqlite_content.zig");
 pub const mongodb_content = @import("mongodb_content.zig");
 pub const content_store = @import("content_store.zig");
