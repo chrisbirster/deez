@@ -3,6 +3,7 @@ const std = @import("std");
 const content = @import("content.zig");
 const interaction = @import("interaction.zig");
 const render = @import("render.zig");
+const card_render = @import("card_render.zig");
 const storage = @import("storage/root.zig");
 const note_type_store = @import("storage/note_type_store.zig");
 const generated_store = @import("storage/generated_card_store.zig");
@@ -21,6 +22,20 @@ pub const CardDraft = struct {
     pub fn deinit(self: CardDraft, allocator: std.mem.Allocator) void {
         allocator.free(self.question);
         allocator.free(self.answer);
+    }
+};
+
+/// A generated card rendered through the shared client-facing renderer.
+///
+/// This is the authoritative preview/generation shape for built-in notes.
+/// Persistence projects `front`/`back` to the legacy stored CardDraft while
+/// web/desktop/mobile clients can consume the structured interaction directly.
+pub const RenderedDraft = struct {
+    generation: Generation,
+    rendered: card_render.RenderedCard,
+
+    pub fn deinit(self: RenderedDraft, allocator: std.mem.Allocator) void {
+        self.rendered.deinit(allocator);
     }
 };
 
@@ -124,66 +139,56 @@ fn collectClozeOrdinals(allocator: std.mem.Allocator, source: []const u8) ![]u32
     return ordinals.toOwnedSlice(allocator);
 }
 
-fn renderedDraft(
+fn fieldValues(allocator: std.mem.Allocator, values: []const []const u8) ![]content.FieldValue {
+    const fields = try allocator.alloc(content.FieldValue, values.len);
+    for (values, 0..) |value, index| fields[index] = .{ .ordinal = @intCast(index), .value = value };
+    return fields;
+}
+
+fn appendRenderedDraft(
     allocator: std.mem.Allocator,
-    definition: content.NoteTypeDefinition,
+    result: *std.ArrayList(RenderedDraft),
+    kind: content.BuiltInNoteType,
     fields: []const content.FieldValue,
-    template_ordinal: content.TemplateOrdinal,
-    cloze_ordinal: ?u32,
-) !CardDraft {
-    const rendered = try render.renderCard(
+    generation: Generation,
+    mode: render.Mode,
+) !void {
+    const template_ordinal: content.TemplateOrdinal = switch (generation) {
+        .template => |ordinal| ordinal,
+        .cloze, .occlusion => 0,
+    };
+    const options: card_render.Options = switch (generation) {
+        .template => .{ .mode = mode },
+        .cloze => |ordinal| .{ .mode = mode, .cloze_ordinal = ordinal },
+        .occlusion => |id| .{ .mode = mode, .occlusion_id = id },
+    };
+    const rendered = try card_render.renderBuiltIn(
         allocator,
-        definition,
+        kind,
         fields,
         template_ordinal,
-        .{
-            .mode = .plain_text,
-            .cloze_ordinal = cloze_ordinal,
-        },
+        options,
     );
-
-    allocator.free(rendered.css);
-    if (rendered.typed_answer) |typed_answer| allocator.free(typed_answer);
-
-    var draft: CardDraft = .{
-        .generation = .{ .template = template_ordinal },
-        .question = rendered.front,
-        .answer = rendered.back,
-    };
-
-    if (cloze_ordinal) |ordinal| {
-        draft.generation = .{ .cloze = ordinal };
-    }
-
-    return draft;
+    errdefer rendered.deinit(allocator);
+    try result.append(allocator, .{ .generation = generation, .rendered = rendered });
 }
 
-fn appendInteractionDraft(
-    allocator: std.mem.Allocator,
-    result: *std.ArrayList(CardDraft),
-    generation: Generation,
-    text: interaction.CardText,
-) !void {
-    errdefer text.deinit(allocator);
-    try result.append(allocator, .{
-        .generation = generation,
-        .question = text.question,
-        .answer = text.answer,
-    });
-}
-
-pub fn drafts(
+/// Generate and render every card variant for an unsaved logical built-in note.
+///
+/// This function performs no storage writes and allocates no persistent card
+/// IDs. It is shared by persistence and client preview so generated-card
+/// multiplicity, rendering, CSS, and structured interaction cannot drift.
+pub fn renderedDrafts(
     allocator: std.mem.Allocator,
     kind: content.BuiltInNoteType,
     values: []const []const u8,
-) ![]CardDraft {
+    mode: render.Mode,
+) ![]RenderedDraft {
     try requireFields(kind, values);
-
-    const definition = kind.definition();
     const fields = try fieldValues(allocator, values);
     defer allocator.free(fields);
 
-    var result: std.ArrayList(CardDraft) = .empty;
+    var result: std.ArrayList(RenderedDraft) = .empty;
     errdefer {
         for (result.items) |draft| draft.deinit(allocator);
         result.deinit(allocator);
@@ -191,69 +196,33 @@ pub fn drafts(
 
     switch (kind) {
         .basic, .type_answer => {
-            try result.append(
-                allocator,
-                try renderedDraft(allocator, definition, fields, 0, null),
-            );
+            try appendRenderedDraft(allocator, &result, kind, fields, .{ .template = 0 }, mode);
         },
         .basic_reverse => {
-            try result.append(
-                allocator,
-                try renderedDraft(allocator, definition, fields, 0, null),
-            );
-            try result.append(
-                allocator,
-                try renderedDraft(allocator, definition, fields, 1, null),
-            );
+            try appendRenderedDraft(allocator, &result, kind, fields, .{ .template = 0 }, mode);
+            try appendRenderedDraft(allocator, &result, kind, fields, .{ .template = 1 }, mode);
         },
         .optional_reverse => {
-            try result.append(
-                allocator,
-                try renderedDraft(allocator, definition, fields, 0, null),
-            );
-
+            try appendRenderedDraft(allocator, &result, kind, fields, .{ .template = 0 }, mode);
             if (std.mem.trim(u8, values[2], " \t\r\n").len != 0) {
-                try result.append(
-                    allocator,
-                    try renderedDraft(allocator, definition, fields, 1, null),
-                );
+                try appendRenderedDraft(allocator, &result, kind, fields, .{ .template = 1 }, mode);
             }
         },
         .cloze => {
             const ordinals = try collectClozeOrdinals(allocator, values[0]);
             defer allocator.free(ordinals);
-
             for (ordinals) |ordinal| {
-                try result.append(
-                    allocator,
-                    try renderedDraft(
-                        allocator,
-                        definition,
-                        fields,
-                        0,
-                        ordinal,
-                    ),
-                );
+                try appendRenderedDraft(allocator, &result, kind, fields, .{ .cloze = ordinal }, mode);
             }
         },
-        .multiple_choice => {
-            const text = try interaction.multipleChoice(allocator, values[0], values[1], values[2], values[3]);
-            try appendInteractionDraft(allocator, &result, .{ .template = 0 }, text);
-        },
-        .multiple_select => {
-            const text = try interaction.multipleSelect(allocator, values[0], values[1], values[2], values[3]);
-            try appendInteractionDraft(allocator, &result, .{ .template = 0 }, text);
-        },
-        .ordering => {
-            const text = try interaction.ordering(allocator, values[0], values[1], values[2]);
-            try appendInteractionDraft(allocator, &result, .{ .template = 0 }, text);
+        .multiple_choice, .multiple_select, .ordering => {
+            try appendRenderedDraft(allocator, &result, kind, fields, .{ .template = 0 }, mode);
         },
         .image_occlusion => {
             const ids = try interaction.occlusionIds(allocator, values[0], values[1]);
             defer allocator.free(ids);
             for (ids) |id| {
-                const text = try interaction.imageOcclusion(allocator, values[0], values[1], values[2], id);
-                try appendInteractionDraft(allocator, &result, .{ .occlusion = id }, text);
+                try appendRenderedDraft(allocator, &result, kind, fields, .{ .occlusion = id }, mode);
             }
         },
     }
@@ -261,10 +230,44 @@ pub fn drafts(
     return result.toOwnedSlice(allocator);
 }
 
-fn fieldValues(allocator: std.mem.Allocator, values: []const []const u8) ![]content.FieldValue {
-    const fields = try allocator.alloc(content.FieldValue, values.len);
-    for (values, 0..) |value, index| fields[index] = .{ .ordinal = @intCast(index), .value = value };
-    return fields;
+/// Legacy persistent-card projection used by storage and terminal study.
+/// The source rendering is the same `renderedDrafts` representation exposed to
+/// graphical clients; only the structured interaction/CSS is discarded here.
+pub fn drafts(
+    allocator: std.mem.Allocator,
+    kind: content.BuiltInNoteType,
+    values: []const []const u8,
+) ![]CardDraft {
+    const rendered = try renderedDrafts(allocator, kind, values, .plain_text);
+    defer {
+        for (rendered) |draft| draft.deinit(allocator);
+        allocator.free(rendered);
+    }
+
+    var result: std.ArrayList(CardDraft) = .empty;
+    errdefer {
+        for (result.items) |draft| draft.deinit(allocator);
+        result.deinit(allocator);
+    }
+
+    for (rendered) |draft| {
+        const question = try allocator.dupe(u8, draft.rendered.front);
+        const answer = allocator.dupe(u8, draft.rendered.back) catch |err| {
+            allocator.free(question);
+            return err;
+        };
+        result.append(allocator, .{
+            .generation = draft.generation,
+            .question = question,
+            .answer = answer,
+        }) catch |err| {
+            allocator.free(question);
+            allocator.free(answer);
+            return err;
+        };
+    }
+
+    return result.toOwnedSlice(allocator);
 }
 
 fn syncCards(
@@ -349,6 +352,54 @@ pub fn update(
         allocator.free(generated);
     }
     return syncCards(allocator, store, deck_id, note_id, generated, updated_at_ms);
+}
+
+fn expectSharedProjection(kind: content.BuiltInNoteType, values: []const []const u8) !void {
+    const persisted = try drafts(std.testing.allocator, kind, values);
+    defer {
+        for (persisted) |draft| draft.deinit(std.testing.allocator);
+        std.testing.allocator.free(persisted);
+    }
+    const rendered = try renderedDrafts(std.testing.allocator, kind, values, .plain_text);
+    defer {
+        for (rendered) |draft| draft.deinit(std.testing.allocator);
+        std.testing.allocator.free(rendered);
+    }
+    try std.testing.expectEqual(persisted.len, rendered.len);
+    for (persisted, rendered) |plain, rich| {
+        try std.testing.expectEqualStrings(plain.question, rich.rendered.front);
+        try std.testing.expectEqualStrings(plain.answer, rich.rendered.back);
+    }
+}
+
+test "all built-in persistent drafts project from shared rendered drafts" {
+    const choices = "[{\"id\":\"stack\",\"text\":\"Stack\"},{\"id\":\"queue\",\"text\":\"Queue\"},{\"id\":\"heap\",\"text\":\"Heap\"}]";
+    const image = "deez-media://sha256:0000000000000000000000000000000000000000000000000000000000000000";
+    const masks = "[{\"id\":1,\"x\":0.1,\"y\":0.1,\"width\":0.2,\"height\":0.2,\"answer\":\"left\"}]";
+
+    const basic = [_][]const u8{ "Front", "Back" };
+    try expectSharedProjection(.basic, &basic);
+    try expectSharedProjection(.basic_reverse, &basic);
+
+    const optional = [_][]const u8{ "Front", "Back", "true" };
+    try expectSharedProjection(.optional_reverse, &optional);
+
+    const cloze = [_][]const u8{ "Paris is {{c1::France}} and Rome is {{c2::Italy}}.", "Europe" };
+    try expectSharedProjection(.cloze, &cloze);
+
+    try expectSharedProjection(.type_answer, &basic);
+
+    const single = [_][]const u8{ "Which is LIFO?", choices, "stack", "A stack is LIFO." };
+    try expectSharedProjection(.multiple_choice, &single);
+
+    const multiple = [_][]const u8{ "Select structures", choices, "[\"stack\",\"queue\"]", "" };
+    try expectSharedProjection(.multiple_select, &multiple);
+
+    const ordering = [_][]const u8{ "Order these", choices, "" };
+    try expectSharedProjection(.ordering, &ordering);
+
+    const occlusion = [_][]const u8{ image, masks, "extra" };
+    try expectSharedProjection(.image_occlusion, &occlusion);
 }
 
 test "reverse note generates stable forward and reverse cards" {
