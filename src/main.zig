@@ -52,9 +52,10 @@ pub fn main(init: std.process.Init) !void {
     const args = try arena.alloc([]const u8, raw_args.len);
     for (raw_args, 0..) |arg, index| args[index] = arg;
 
-    const route = deez.thrawn_cli.parse(arena, args) catch |err| {
+    var route = deez.thrawn_cli.parse(arena, args) catch |err| {
         printErrorAndExit(init, err, deez.thrawn_cli.errorHelp(args));
     };
+    defer route.deinit(arena);
 
     switch (route) {
         .help => |help| try printHelp(init, help),
