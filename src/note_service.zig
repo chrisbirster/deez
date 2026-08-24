@@ -46,18 +46,23 @@ fn idIn(ids: []const u64, id: u64) bool {
     return false;
 }
 
-fn ensureNoteBelongsToDeck(
+fn deckForNote(
     allocator: std.mem.Allocator,
     store: *storage.Store,
     card_ids: []const u64,
-    deck_id: u64,
-) !void {
+) !u64 {
     if (card_ids.len == 0) return error.NoteHasNoGeneratedCards;
-    for (card_ids) |card_id| {
+
+    const first = (try store.getCard(allocator, card_ids[0])) orelse return error.CardNotFound;
+    defer first.deinit(allocator);
+    const deck_id = first.deck_id;
+
+    for (card_ids[1..]) |card_id| {
         const card = (try store.getCard(allocator, card_id)) orelse return error.CardNotFound;
         defer card.deinit(allocator);
         if (card.deck_id != deck_id) return error.NoteDeckMismatch;
     }
+    return deck_id;
 }
 
 fn preflightRemovedCards(
@@ -106,7 +111,6 @@ pub fn create(
 pub fn update(
     allocator: std.mem.Allocator,
     store: *storage.Store,
-    deck_id: u64,
     note_id: content.NoteId,
     values: []const []const u8,
     tags_json: []const u8,
@@ -125,7 +129,7 @@ pub fn update(
 
     const existing_ids = try generated_store.cardIdsForNote(allocator, store, note_id);
     defer allocator.free(existing_ids);
-    try ensureNoteBelongsToDeck(allocator, store, existing_ids, deck_id);
+    const deck_id = try deckForNote(allocator, store, existing_ids);
     try preflightRemovedCards(allocator, store, note_id, existing_ids, generated);
 
     const desired_ids = try card_types.update(
@@ -239,7 +243,7 @@ test "optional reverse edit removes obsolete unreviewed generated card" {
     try std.testing.expectEqual(@as(usize, 2), created.card_ids.len);
 
     const changed = [_][]const u8{ "France", "Paris", "" };
-    const updated = try update(allocator, &store, deck_id, created.note_id, &changed, "[]", 1);
+    const updated = try update(allocator, &store, created.note_id, &changed, "[]", 1);
     defer allocator.free(updated);
     try std.testing.expectEqual(@as(usize, 1), updated.len);
 
