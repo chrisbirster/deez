@@ -45,6 +45,7 @@ pub const Study = study.Study;
 
 test {
     std.testing.refAllDecls(@This());
+    _ = @import("thrawn_cli_test.zig");
     _ = @import("interchange_test.zig");
     _ = @import("interaction_roundtrip_test.zig");
     _ = @import("study_replay_tests.zig");
