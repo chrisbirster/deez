@@ -109,8 +109,9 @@ test "SQLite retirement is reversible without deleting the card" {
     try std.testing.expect(!try sqliteIsRetired(&db, card_id));
     try sqliteRetire(&db, card_id, 10);
     try std.testing.expect(try sqliteIsRetired(&db, card_id));
-    try std.testing.expect((try db.getCard(std.testing.allocator, card_id)) != null);
-    if (try db.getCard(std.testing.allocator, card_id)) |card| card.deinit(std.testing.allocator);
+    const card = (try db.getCard(std.testing.allocator, card_id)).?;
+    defer card.deinit(std.testing.allocator);
+    try std.testing.expectEqual(card_id, card.id);
     try sqliteRestore(&db, card_id);
     try std.testing.expect(!try sqliteIsRetired(&db, card_id));
 }
