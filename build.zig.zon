@@ -8,6 +8,9 @@
             .url = "git+https://github.com/chrisbirster/bongo?ref=v0.6.0#1c7bdf9eb5b1c63236a432333a6b26d51d1a4ae5",
             .hash = "bongo-0.6.0-H33KDXopCwDlrfKOVUebF5IEweq_CgsO9ioPKj_C-gu3",
         },
+        .httpz = .{
+            .url = "https://github.com/karlseguin/http.zig/archive/5432c5b4fbf10768ba0a6ca3481055ac2964fd9b.tar.gz",
+        },
     },
     .paths = .{
         "build.zig",
