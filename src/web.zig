@@ -280,10 +280,15 @@ fn parseRouteId(req: *httpz.Request, res: *httpz.Response, name: []const u8) ?u6
         jsonError(res, 400, "invalid_id", "Missing resource ID") catch {};
         return null;
     };
-    return std.fmt.parseInt(u64, text, 10) catch {
+    return parseIdText(text) catch {
         jsonError(res, 400, "invalid_id", "Resource ID must be an unsigned integer") catch {};
         return null;
     };
+}
+
+fn parseIdText(text: []const u8) !u64 {
+    if (text.len == 0) return error.InvalidId;
+    return std.fmt.parseInt(u64, text, 10) catch error.InvalidId;
 }
 
 fn noteTypeSlug(note_type_id: content.NoteTypeId) ![]const u8 {
@@ -355,7 +360,9 @@ test "local web origin validation permits absent or exact same-origin headers" {
     try std.testing.expect(!isAllowedOrigin("https://example.com", 49317));
 }
 
-test "route IDs only accept unsigned decimal integers" {
-    try std.testing.expectEqual(@as(u64, 42), try std.fmt.parseInt(u64, "42", 10));
-    try std.testing.expectError(error.InvalidCharacter, std.fmt.parseInt(u64, "-1", 10));
+test "resource IDs normalize invalid unsigned input" {
+    try std.testing.expectEqual(@as(u64, 42), try parseIdText("42"));
+    try std.testing.expectError(error.InvalidId, parseIdText("-1"));
+    try std.testing.expectError(error.InvalidId, parseIdText("abc"));
+    try std.testing.expectError(error.InvalidId, parseIdText(""));
 }
