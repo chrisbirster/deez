@@ -6,6 +6,7 @@ const content = @import("content.zig");
 const storage = @import("storage/root.zig");
 const web_assets = @import("web_assets.zig");
 const web_cards = @import("web_cards.zig");
+const web_media = @import("web_media.zig");
 const web_notes = @import("web_notes.zig");
 const web_study = @import("web_study.zig");
 
@@ -65,6 +66,7 @@ const Handler = struct {
     port: u16,
     store: *storage.Store,
     web_root: ?[]const u8,
+    media_root: []const u8,
     store_mutex: Io.Mutex = .init,
 
     fn requestAllowed(self: *Handler, req: *httpz.Request) bool {
@@ -80,6 +82,13 @@ const Handler = struct {
     ) !void {
         if (!self.requestAllowed(req)) {
             forbidden(res);
+            return;
+        }
+
+        // Hash-addressed media does not touch the shared Store, so do not hold
+        // the database mutex while sending potentially large local media blobs.
+        if (std.mem.startsWith(u8, req.url.path, "/api/v1/media/")) {
+            try action(self, req, res);
             return;
         }
 
@@ -122,11 +131,13 @@ const Handler = struct {
 pub fn run(init: std.process.Init, store: *storage.Store, options: Options) !void {
     if (options.port == 0) return error.InvalidPort;
 
+    const media_root = try web_media.resolveRoot(init, init.arena.allocator());
     var handler: Handler = .{
         .io = init.io,
         .port = options.port,
         .store = store,
         .web_root = options.web_root,
+        .media_root = media_root,
     };
     var server = try httpz.Server(*Handler).init(init.io, init.gpa, .{
         .address = .localhost(options.port),
@@ -156,6 +167,7 @@ pub fn run(init: std.process.Init, store: *storage.Store, options: Options) !voi
     router.get("/api/v1/health", health, .{});
     router.get("/api/v1/version", versionInfo, .{});
     router.get("/api/v1/capabilities", capabilities, .{});
+    router.get("/api/v1/media/:hash", mediaAsset, .{});
     router.get("/api/v1/decks", decks, .{});
     router.get("/api/v1/decks/:id", deck, .{});
     router.get("/api/v1/decks/:id/notes", deckNotes, .{});
@@ -235,6 +247,10 @@ fn capabilities(_: *Handler, _: *httpz.Request, res: *httpz.Response) !void {
         .import_formats = &formats,
         .export_formats = &formats,
     }, .{});
+}
+
+fn mediaAsset(self: *Handler, req: *httpz.Request, res: *httpz.Response) !void {
+    try web_media.serve(self.io, self.media_root, req, res);
 }
 
 fn decks(self: *Handler, _: *httpz.Request, res: *httpz.Response) !void {
