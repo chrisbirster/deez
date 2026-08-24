@@ -160,7 +160,7 @@ fn writeError(
 ) !void {
     res.status = status;
     try res.json(.{
-        .error = .{
+        .@"error" = .{
             .code = code,
             .message = message,
         },
