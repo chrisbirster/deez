@@ -30,6 +30,9 @@ jobs:
           fi
       - name: Build
         run: zig build
+      - name: Local Web API smoke
+        shell: bash
+        run: bash test/web_smoke.sh
       - name: First-run and shareable deck smoke
         shell: bash
         run: |

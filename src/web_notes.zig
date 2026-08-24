@@ -94,6 +94,36 @@ fn jsonError(res: *httpz.Response, status: u16, code: []const u8, message: []con
     }, .{});
 }
 
+fn isInvalidNoteError(err: anyerror) bool {
+    const name = @errorName(err);
+    const validation_errors = [_][]const u8{
+        "InvalidFieldCount",
+        "InvalidText",
+        "EmptyText",
+        "InvalidCloze",
+        "ClozeRequired",
+        "InvalidInteractionText",
+        "NotEnoughChoices",
+        "UnknownChoiceId",
+        "CorrectChoiceRequired",
+        "DuplicateChoiceId",
+        "DuplicateCorrectChoiceId",
+        "InvalidChoiceJson",
+        "InvalidMaskJson",
+        "InvalidOrderingJson",
+        "InvalidImageReference",
+        "OcclusionRequired",
+    };
+    for (validation_errors) |candidate| {
+        if (std.mem.eql(u8, name, candidate)) return true;
+    }
+    return false;
+}
+
+fn invalidNote(res: *httpz.Response) !void {
+    try jsonError(res, 400, "invalid_note", "Note fields are invalid for this note type");
+}
+
 fn parseInput(req: *httpz.Request, res: *httpz.Response) !?NoteInput {
     return req.json(NoteInput) catch {
         try jsonError(res, 400, "invalid_json", "Request body must be a valid note input");
@@ -243,13 +273,11 @@ pub fn createNote(
         tags_json,
         nowMs(io),
     ) catch |err| {
-        switch (err) {
-            error.InvalidFieldCount, error.EmptyText, error.InvalidCloze, error.ClozeRequired, error.InvalidInteractionText, error.NotEnoughChoices, error.UnknownChoiceId, error.CorrectChoiceRequired, error.DuplicateChoiceId, error.DuplicateCorrectChoiceId => {
-                try jsonError(res, 400, "invalid_note", "Note fields are invalid for this note type");
-                return;
-            },
-            else => return err,
+        if (isInvalidNoteError(err)) {
+            try invalidNote(res);
+            return;
         }
+        return err;
     };
     res.status = 201;
     try writeNote(store, res, generated.note_id);
@@ -286,13 +314,11 @@ pub fn updateNote(
         tags_json,
         nowMs(io),
     ) catch |err| {
-        switch (err) {
-            error.InvalidFieldCount, error.EmptyText, error.InvalidCloze, error.ClozeRequired, error.InvalidInteractionText, error.NotEnoughChoices, error.UnknownChoiceId, error.CorrectChoiceRequired, error.DuplicateChoiceId, error.DuplicateCorrectChoiceId => {
-                try jsonError(res, 400, "invalid_note", "Note fields are invalid for this note type");
-                return;
-            },
-            else => return err,
+        if (isInvalidNoteError(err)) {
+            try invalidNote(res);
+            return;
         }
+        return err;
     };
     _ = ids;
     try writeNote(store, res, note_id);
@@ -324,13 +350,11 @@ pub fn previewNote(
         return;
     };
     const drafts = card_types.renderedDrafts(res.arena, kind, input.fields, .html) catch |err| {
-        switch (err) {
-            error.InvalidFieldCount, error.EmptyText, error.InvalidCloze, error.ClozeRequired, error.InvalidInteractionText, error.NotEnoughChoices, error.UnknownChoiceId, error.CorrectChoiceRequired, error.DuplicateChoiceId, error.DuplicateCorrectChoiceId => {
-                try jsonError(res, 400, "invalid_note", "Note fields are invalid for this note type");
-                return;
-            },
-            else => return err,
+        if (isInvalidNoteError(err)) {
+            try invalidNote(res);
+            return;
         }
+        return err;
     };
     const cards = try res.arena.alloc(RenderedCardResponse, drafts.len);
     for (drafts, 0..) |draft, index| {
@@ -352,4 +376,10 @@ test "generation response matches the web contract" {
     const cloze = generationResponse(.{ .cloze = 3 });
     try std.testing.expectEqualStrings("cloze", cloze.kind);
     try std.testing.expectEqual(@as(u32, 3), cloze.ordinal);
+}
+
+test "validation error classification is independent of inferred error sets" {
+    try std.testing.expect(isInvalidNoteError(error.InvalidText));
+    try std.testing.expect(isInvalidNoteError(error.InvalidFieldCount));
+    try std.testing.expect(!isInvalidNoteError(error.OutOfMemory));
 }

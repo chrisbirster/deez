@@ -11,6 +11,7 @@ test {
     _ = @import("mongodb_nut.zig");
     _ = @import("mongodb_content.zig");
     _ = @import("mongodb_card_types.zig");
+    _ = @import("mongodb_note_mutation.zig");
     _ = @import("mongodb_recovery.zig");
     _ = @import("mongodb_scheduler_migration.zig");
 }
