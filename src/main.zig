@@ -57,9 +57,10 @@ pub fn main(init: std.process.Init) !void {
         return;
     }
 
-    const route = deez.thrawn_cli.parse(arena, args) catch |err| {
+    var route = deez.thrawn_cli.parse(arena, args) catch |err| {
         printErrorAndExit(init, err, deez.thrawn_cli.errorHelp(args));
     };
+    defer route.deinit(arena);
 
     switch (route) {
         .help => |help| try printHelp(init, help),

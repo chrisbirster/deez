@@ -17,11 +17,41 @@ pub const Route = union(enum) {
     backup_cli,
     notes_cli,
     rich_cli,
+
+    pub fn deinit(self: *Route, allocator: std.mem.Allocator) void {
+        switch (self.*) {
+            .core => |command| switch (command) {
+                .deck_add => |args| allocator.free(@constCast(args.name)),
+                .deck_rename => |args| allocator.free(@constCast(args.name)),
+                .deck_import => |args| allocator.free(@constCast(args.path)),
+                .nut_import => |args| allocator.free(@constCast(args.path)),
+                .note_add => |args| {
+                    allocator.free(@constCast(args.note_type));
+                    freeFields(allocator, args.fields);
+                },
+                .note_edit => |args| freeFields(allocator, args.fields),
+                .card_add => |args| {
+                    allocator.free(@constCast(args.question));
+                    allocator.free(@constCast(args.answer));
+                },
+                .card_edit => |args| {
+                    allocator.free(@constCast(args.question));
+                    allocator.free(@constCast(args.answer));
+                },
+                else => {},
+            },
+            else => {},
+        }
+    }
 };
+
+fn freeFields(allocator: std.mem.Allocator, fields: []const []const u8) void {
+    for (fields) |field| allocator.free(@constCast(field));
+    allocator.free(@constCast(fields));
+}
 
 const ParseState = struct {
     route: ?Route = null,
-    raw_args: []const []const u8 = &.{},
 };
 
 fn parseState(ctx: *th.Context) !*ParseState {
@@ -31,12 +61,6 @@ fn parseState(ctx: *th.Context) !*ParseState {
 fn setRoute(ctx: *th.Context, route: Route) !void {
     const state = try parseState(ctx);
     state.route = route;
-}
-
-fn rawTail(ctx: *th.Context, start: usize) ![]const []const u8 {
-    const state = try parseState(ctx);
-    if (start > state.raw_args.len) return error.InvalidArguments;
-    return state.raw_args[start..];
 }
 
 fn parseId(text: []const u8) !u64 {
@@ -54,6 +78,11 @@ fn parseFloat(text: []const u8) !f64 {
 fn requireText(text: []const u8) ![]const u8 {
     if (std.mem.trim(u8, text, " \t\r\n").len == 0) return error.InvalidText;
     return text;
+}
+
+fn dupeText(ctx: *th.Context, index: usize) ![]u8 {
+    _ = try requireText(ctx.args[index]);
+    return (try ctx.dupeArgument(ctx.allocator, index)) orelse error.InvalidArguments;
 }
 
 fn parseStudyOrder(text: []const u8) !cli.StudyOrder {
@@ -94,13 +123,17 @@ fn cardsHandler(ctx: *th.Context) !void {
 }
 
 fn deckAddHandler(ctx: *th.Context) !void {
-    try setRoute(ctx, .{ .core = .{ .deck_add = .{ .name = try requireText(ctx.args[0]) } } });
+    const name = try dupeText(ctx, 0);
+    errdefer ctx.allocator.free(name);
+    try setRoute(ctx, .{ .core = .{ .deck_add = .{ .name = name } } });
 }
 
 fn deckRenameHandler(ctx: *th.Context) !void {
+    const name = try dupeText(ctx, 1);
+    errdefer ctx.allocator.free(name);
     try setRoute(ctx, .{ .core = .{ .deck_rename = .{
         .deck_id = try parseId(ctx.args[0]),
-        .name = try requireText(ctx.args[1]),
+        .name = name,
     } } });
 }
 
@@ -114,7 +147,9 @@ fn deckExportHandler(ctx: *th.Context) !void {
 }
 
 fn deckImportHandler(ctx: *th.Context) !void {
-    try setRoute(ctx, .{ .core = .{ .deck_import = .{ .path = try requireText(ctx.args[0]) } } });
+    const path = try dupeText(ctx, 0);
+    errdefer ctx.allocator.free(path);
+    try setRoute(ctx, .{ .core = .{ .deck_import = .{ .path = path } } });
 }
 
 fn nutExportHandler(ctx: *th.Context) !void {
@@ -122,30 +157,38 @@ fn nutExportHandler(ctx: *th.Context) !void {
 }
 
 fn nutImportHandler(ctx: *th.Context) !void {
-    try setRoute(ctx, .{ .core = .{ .nut_import = .{ .path = try requireText(ctx.args[0]) } } });
+    const path = try dupeText(ctx, 0);
+    errdefer ctx.allocator.free(path);
+    try setRoute(ctx, .{ .core = .{ .nut_import = .{ .path = path } } });
 }
 
 fn noteAddHandler(ctx: *th.Context) !void {
+    const note_type = try dupeText(ctx, 1);
+    errdefer ctx.allocator.free(note_type);
+    const fields = try ctx.dupeArguments(ctx.allocator, 2);
+    errdefer freeFields(ctx.allocator, fields);
+
     try setRoute(ctx, .{
         .core = .{
             .note_add = .{
                 .deck_id = try parseId(ctx.args[0]),
-                .note_type = try requireText(ctx.args[1]),
-                // parsed.positionals owns only the outer slice. Keep the returned
-                // variadic field slice borrowed from the caller's argv instead.
-                .fields = try rawTail(ctx, 2),
+                .note_type = note_type,
+                .fields = fields,
             },
         },
     });
 }
 
 fn noteEditHandler(ctx: *th.Context) !void {
+    const fields = try ctx.dupeArguments(ctx.allocator, 2);
+    errdefer freeFields(ctx.allocator, fields);
+
     try setRoute(ctx, .{
         .core = .{
             .note_edit = .{
                 .deck_id = try parseId(ctx.args[0]),
                 .note_id = try parseId(ctx.args[1]),
-                .fields = try rawTail(ctx, 2),
+                .fields = fields,
             },
         },
     });
@@ -157,18 +200,28 @@ fn notesHandler(ctx: *th.Context) !void {
 }
 
 fn cardAddHandler(ctx: *th.Context) !void {
+    const question = try dupeText(ctx, 1);
+    errdefer ctx.allocator.free(question);
+    const answer = try dupeText(ctx, 2);
+    errdefer ctx.allocator.free(answer);
+
     try setRoute(ctx, .{ .core = .{ .card_add = .{
         .deck_id = try parseId(ctx.args[0]),
-        .question = try requireText(ctx.args[1]),
-        .answer = try requireText(ctx.args[2]),
+        .question = question,
+        .answer = answer,
     } } });
 }
 
 fn cardEditHandler(ctx: *th.Context) !void {
+    const question = try dupeText(ctx, 1);
+    errdefer ctx.allocator.free(question);
+    const answer = try dupeText(ctx, 2);
+    errdefer ctx.allocator.free(answer);
+
     try setRoute(ctx, .{ .core = .{ .card_edit = .{
         .card_id = try parseId(ctx.args[0]),
-        .question = try requireText(ctx.args[1]),
-        .answer = try requireText(ctx.args[2]),
+        .question = question,
+        .answer = answer,
     } } });
 }
 
@@ -608,7 +661,7 @@ pub fn parse(allocator: std.mem.Allocator, argv: []const []const u8) !Route {
 
     if (!selection.command.args.valid(parsed.positionals.len)) return error.InvalidArguments;
 
-    var state: ParseState = .{ .raw_args = selection.args };
+    var state: ParseState = .{};
     var stdout_buffer: [1]u8 = undefined;
     var stderr_buffer: [1]u8 = undefined;
     var stdout = std.Io.Writer.fixed(&stdout_buffer);
