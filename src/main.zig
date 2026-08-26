@@ -72,8 +72,7 @@ pub fn main(init: std.process.Init) !void {
     if (deez.web_cli.isCommand(args)) {
         deez.web_cli.run(init, args) catch |err| {
             switch (err) {
-                error.InvalidArguments, error.InvalidPort =>
-                    printRawErrorAndExit(init, err, deez.web_cli.help_text),
+                error.InvalidArguments, error.InvalidPort => printRawErrorAndExit(init, err, deez.web_cli.help_text),
                 else => return err,
             }
         };
