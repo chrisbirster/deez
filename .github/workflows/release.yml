@@ -48,8 +48,40 @@ jobs:
           echo "should_release=${SHOULD_RELEASE}" >> "$GITHUB_OUTPUT"
           echo "release_tag=${TAG} should_release=${SHOULD_RELEASE}"
 
-  build-macos:
+  web-assets:
     needs: prepare
+    if: needs.prepare.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out pinned Deez Web
+        uses: actions/checkout@v4
+        with:
+          repository: chrisbirster/deez-web
+          ref: 9669f3fe6241138d1e13cbd6368e9cfa0d2ebef4
+          path: deez-web
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install Deez Web dependencies
+        working-directory: deez-web
+        run: npm install --no-audit --no-fund
+      - name: Validate and build Deez Web
+        working-directory: deez-web
+        run: |
+          npm run typecheck
+          npm run build
+          test -f dist/index.html
+          test -d dist/assets
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deez-web-dist
+          path: deez-web/dist
+          if-no-files-found: error
+
+  build-macos:
+    needs:
+      - prepare
+      - web-assets
     if: needs.prepare.outputs.should_release == 'true'
     strategy:
       matrix:
@@ -68,14 +100,57 @@ jobs:
         run: zig build -Doptimize=ReleaseFast
       - name: Smoke test binary
         run: ./zig-out/bin/deez --help >/dev/null
-      - name: Package binary
+      - name: Assemble portable package
         shell: bash
-        env:
-          ARCHIVE: ${{ matrix.archive }}
         run: |
           mkdir -p dist/package
           cp zig-out/bin/deez dist/package/deez
-          tar -C dist/package -czf "dist/${ARCHIVE}" deez
+      - name: Download Deez Web bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: deez-web-dist
+          path: dist/package/web
+      - name: Smoke test packaged Deez Web
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f dist/package/web/index.html
+          test -d dist/package/web/assets
+
+          tmp=$(mktemp -d)
+          port=49321
+          web_pid=""
+          cleanup() {
+            if [[ -n "$web_pid" ]]; then
+              kill "$web_pid" >/dev/null 2>&1 || true
+              wait "$web_pid" >/dev/null 2>&1 || true
+            fi
+            rm -rf "$tmp"
+          }
+          trap cleanup EXIT
+
+          DEEZ_STORAGE=sqlite DEEZ_DB="$tmp/deez.db" ./dist/package/deez web --port "$port" >"$tmp/web.log" 2>&1 &
+          web_pid=$!
+          ready=0
+          for _ in $(seq 1 50); do
+            if curl -fsS "http://127.0.0.1:${port}/" >"$tmp/index.html" 2>/dev/null; then
+              ready=1
+              break
+            fi
+            sleep 0.1
+          done
+          if [[ "$ready" != 1 ]]; then
+            cat "$tmp/web.log" >&2
+            exit 1
+          fi
+          grep -q '<title>Deez</title>' "$tmp/index.html"
+          curl -fsS "http://127.0.0.1:${port}/decks/1" | grep -q '<title>Deez</title>'
+          grep -q 'assets:' "$tmp/web.log"
+      - name: Package binary and web assets
+        shell: bash
+        env:
+          ARCHIVE: ${{ matrix.archive }}
+        run: tar -C dist/package -czf "dist/${ARCHIVE}" deez web
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.archive }}
@@ -165,10 +240,12 @@ jobs:
 
             def install
               bin.install "deez"
+              (share/"deez").install "web"
             end
 
             test do
               assert_match "DEEZ", shell_output("#{bin}/deez --help")
+              assert_match "--web-root", shell_output("#{bin}/deez web --help")
             end
           end
           EOF

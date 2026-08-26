@@ -209,6 +209,9 @@ pub fn updateNote(
     }
 }
 
+/// Remove logical-note and generated-card metadata without deleting physical
+/// cards. Callers must retire the note's cards first so immutable review and
+/// scheduler history remain preserved but the cards disappear from study.
 pub fn deleteNote(store: *store_mod.Store, note_id: content.NoteId) !void {
     switch (store.*) {
         .sqlite => |db| {
@@ -218,6 +221,21 @@ pub fn deleteNote(store: *store_mod.Store, note_id: content.NoteId) !void {
             if (c.sqlite3_step(stmt) != c.SQLITE_DONE) return error.SqliteStepFailed;
         },
         .mongodb => |*mongo| {
+            var cursor = try mongo.client.find(
+                mongo.client.databaseName(),
+                "generated_cards",
+                .{ .note_id = @as(i64, @intCast(note_id)) },
+                .{ .sort = .{ ._id = @as(i32, 1) } },
+            );
+            defer cursor.deinit();
+            while (try cursor.next()) |document| {
+                const card_id = try requiredI64(document, "_id");
+                _ = try mongo.client.deleteOne(
+                    mongo.client.databaseName(),
+                    "generated_cards",
+                    .{ ._id = card_id },
+                );
+            }
             _ = try mongo.client.deleteOne(
                 mongo.client.databaseName(),
                 "notes",

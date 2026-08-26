@@ -11,8 +11,8 @@ pub fn build(b: *std.Build) void {
         .limited(128),
     ) catch @panic("failed to read VERSION");
     const version = std.mem.trim(u8, raw_version, " \t\r\n");
-    const deez_build_options = b.addOptions();
-    deez_build_options.addOption([]const u8, "version", version);
+    const build_options = b.addOptions();
+    build_options.addOption([]const u8, "version", version);
 
     const bongo_dependency = b.dependency("bongo", .{
         .target = target,
@@ -37,7 +37,8 @@ pub fn build(b: *std.Build) void {
     mod.addImport("bongo", bongo_dependency.module("bongo"));
     mod.addImport("thrawn", thrawn_dependency.module("thrawn"));
     mod.addImport("httpz", httpz_dependency.module("httpz"));
-    mod.addOptions("deez_build_options", deez_build_options);
+    mod.addOptions("build_options", build_options);
+    mod.addOptions("deez_build_options", build_options);
 
     const exe = b.addExecutable(.{
         .name = "deez",
