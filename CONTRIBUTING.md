@@ -15,9 +15,11 @@ A change is not acceptable if it requires rewriting historical reviews just to f
 - `src/study.zig` — study/replay/session orchestration
 - `src/interchange_mongodb.zig` — Mongo logical backup/restore
 - `src/import/` — external-history importers
-- `src/thrawn_cli.zig` — declarative Thrawn command tree, CLI resolution, options, and validation
+- `src/cli_tree.zig` — declarative Thrawn command tree, CLI resolution, options, validation, and application-state routing
 - `src/cli.zig` — domain command union and stable help text consumed by the application layer
 - `src/app.zig` — execution of parsed domain commands against storage/scheduler APIs
+- `src/server.zig` — loopback local client API exposed by `deez serve`
+- `src/web.zig` / `src/web_cli.zig` — local browser UI server exposed by `deez web`
 
 Thrawn owns generic CLI mechanics only. Deez owns its command semantics, storage selection, scheduler behavior, streaming archive behavior, and exit-code policy. Do not move Deez-specific domain behavior into Thrawn.
 
@@ -25,7 +27,7 @@ Storage APIs are operation-oriented. Do not add a fake generic SQL/Mongo query l
 
 ## MongoDB/Bongo
 
-Bongo v0.4.0 is the pinned external MongoDB dependency. Deez currently pins commit `8184b6266bab78fd3eb7fd8d2318f79f90e51937` and must use Bongo's public APIs rather than reaching into Bongo internals.
+Bongo v0.6.0 is the pinned external MongoDB dependency. Deez currently pins commit `1c7bdf9eb5b1c63236a432333a6b26d51d1a4ae5` and must use Bongo's public APIs rather than reaching into Bongo internals.
 
 New persistence behavior should be exercised against the MongoDB integration fixture when it affects production data. Replica-set transaction behavior and standalone fallback behavior are intentionally different and must remain explicit.
 
