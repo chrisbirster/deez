@@ -13,6 +13,9 @@ pub fn build(b: *std.Build) void {
     const version = std.mem.trim(u8, raw_version, " \t\r\n");
     const build_options = b.addOptions();
     build_options.addOption([]const u8, "version", version);
+    const deez_build_options = b.addOptions();
+    deez_build_options.addOption([]const u8, "version", version);
+    deez_build_options.addOption(bool, "local_api_server", true);
 
     const bongo_dependency = b.dependency("bongo", .{
         .target = target,
@@ -38,6 +41,7 @@ pub fn build(b: *std.Build) void {
     mod.addImport("thrawn", thrawn_dependency.module("thrawn"));
     mod.addImport("httpz", httpz_dependency.module("httpz"));
     mod.addOptions("build_options", build_options);
+    mod.addOptions("deez_build_options", deez_build_options);
 
     const exe = b.addExecutable(.{
         .name = "deez",
