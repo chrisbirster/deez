@@ -38,6 +38,19 @@ export DEEZ_MONGO_URI='mongodb://localhost:27017/deez'
 
 Help output does not require or initialize a database.
 
+## Local clients
+
+Deez exposes two loopback-only local client entry points while the Zig process remains authoritative for data and domain behavior.
+
+```text
+deez serve [--port <1..65535>]
+deez web [--port <1..65535>] [--no-open]
+```
+
+`deez serve` exposes the versioned local client API on `127.0.0.1` (default port `5882`). `deez web` serves the browser UI and its local API surface on loopback. Neither command turns the browser or another client into a second data authority.
+
+See `docs/client-architecture.md` for the client/API boundary.
+
 ## Exit codes
 
 | Code | Meaning |
@@ -69,6 +82,8 @@ deez deck export <deck-id> > deck.json
 deez deck import <deck.json|deck.nut>
 deez nut export <deck-id> > deck.nut
 deez nut import <deck.nut>
+deez note add <deck-id> <note-type> <fields...>
+deez note edit <deck-id> <note-id> <fields...>
 deez card add <deck-id> <question> <answer>
 deez card edit <card-id> <question> <answer>
 deez card delete <card-id> --yes
@@ -78,41 +93,16 @@ A deck is the top-level content container. Cards belong to exactly one deck. `de
 
 ### Shareable JSON decks
 
-`deck export` writes a portable content-only JSON document:
-
-```json
-{
-  "format": "deez.deck",
-  "version": 1,
-  "deck": {
-    "name": "Zig Basics",
-    "cards": [
-      {
-        "question": "What is Zig?",
-        "answer": "A systems programming language"
-      }
-    ]
-  }
-}
-```
-
-Example round trip:
-
-```bash
-deez deck export 1 > zig-basics.json
-deez deck import zig-basics.json
-```
-
-Import creates a new deck and new cards in the currently configured backend. The same JSON file can therefore be loaded into SQLite or MongoDB without changing the file.
+`deck export` writes a portable content-only JSON document. Import creates a new deck and generated study cards in the currently configured backend. The same JSON file can therefore be loaded into SQLite or MongoDB without changing the file.
 
 ### Native `.nut` decks
 
-`.nut` is Deez's native shareable deck format. It is NDJSON: one complete JSON object per non-empty line.
+`.nut` is Deez's native human-readable shareable deck format. Version 2 is NDJSON: one complete JSON object per non-empty line, with logical notes rather than generated cards.
 
 ```text
-{"kind":"deck","format":"deez.nut","version":1,"name":"Zig Basics"}
-{"kind":"card","question":"What is Zig?","answer":"A systems programming language"}
-{"kind":"card","question":"What is comptime?","answer":"Compile-time execution"}
+{"kind":"deck","format":"deez.nut","version":2,"name":"Zig Basics"}
+{"kind":"note","note_type":"basic","fields":["What is Zig?","A systems programming language"],"tags_json":"[]"}
+{"kind":"note","note_type":"reverse","fields":["Capital of France","Paris"],"tags_json":"[]"}
 ```
 
 Export and import with:
@@ -128,9 +118,9 @@ The general deck importer also recognizes `.nut` by extension:
 deez deck import zig-basics.nut
 ```
 
-JSON deck files and `.nut` files intentionally exclude personal review history, scheduler state, due dates, difficulty, stability, and parameter-set identity. A downloaded deck starts fresh for its importer. Use backup/restore for full-fidelity personal data migration.
+Generated cards are rebuilt from the logical note type and templates during import. `.nut` files intentionally exclude personal review history, scheduler state, due dates, difficulty, stability, and parameter-set identity. A downloaded deck starts fresh for its importer. Use backup/restore for full-fidelity personal data migration.
 
-See `docs/nut-format.md` for the `.nut` versioning and validation rules.
+See `docs/nut-format.md` for the `.nut` versioning, built-in note types, media references, and validation rules.
 
 ## Study
 
@@ -201,4 +191,6 @@ deez backup --help
 deez restore --help
 ```
 
-The declarative command tree and parser live in `src/thrawn_cli.zig` and use Thrawn for command resolution, options, and argument validation. `src/cli.zig` retains the Deez domain command union and stable help contract consumed by `src/app.zig`. Backup/restore keeps its dedicated streaming executor because archives flow through stdin/stdout, while Thrawn validates and routes those commands before execution. Storage and scheduling behavior remain behind Deez domain APIs rather than in the CLI framework.
+The declarative command tree and parser live in `src/cli_tree.zig` and use Thrawn for command resolution, options, argument validation, configurable help handling, and owned values that cross the handler boundary. `src/cli.zig` retains the Deez domain command union and stable help contract consumed by `src/app.zig`.
+
+Backup/restore and rich media retain dedicated executors because of their streaming/file-oriented behavior. `deez web` and `deez serve` are application-owned local client entry points. Storage, scheduling, rendering, and client behavior remain behind Deez domain APIs rather than in the CLI framework.
