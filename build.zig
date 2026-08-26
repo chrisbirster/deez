@@ -38,7 +38,6 @@ pub fn build(b: *std.Build) void {
     mod.addImport("thrawn", thrawn_dependency.module("thrawn"));
     mod.addImport("httpz", httpz_dependency.module("httpz"));
     mod.addOptions("build_options", build_options);
-    mod.addOptions("deez_build_options", build_options);
 
     const exe = b.addExecutable(.{
         .name = "deez",
