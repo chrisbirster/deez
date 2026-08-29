@@ -90,7 +90,7 @@ fn validateV2(file: FileV2Input) !void {
     if (file.version != format_version) return error.UnsupportedDeckVersion;
     try requireText(file.deck.name);
     for (file.deck.notes) |note| {
-        _ = try @import("content.zig").BuiltInNoteType.parse(note.note_type);
+        _ = try @import("content.zig").BuiltInNoteType.parseStored(note.note_type);
         if (note.fields.len == 0) return error.InvalidFieldCount;
     }
 }
@@ -235,4 +235,16 @@ test "JSON v2 reverse note round trips as one logical note" {
     }
     try std.testing.expectEqual(@as(usize, 1), notes.len);
     try std.testing.expectEqualStrings("basic-reverse", notes[0].note_type);
+}
+
+test "JSON v2 legacy optional reverse remains importable" {
+    var db = try storage.Db.open(":memory:");
+    defer db.close();
+    try db.migrate();
+    var store: storage.Store = .{ .sqlite = &db };
+    const json =
+        \\{"format":"deez.deck","version":2,"deck":{"name":"Legacy Optional Reverse","notes":[{"note_type":"optional-reverse","fields":["front","back","yes"],"tags_json":"[]"}]}}
+    ;
+    const result = try importSlice(std.testing.allocator, &store, json, 0);
+    try std.testing.expectEqual(@as(usize, 2), result.card_count);
 }
