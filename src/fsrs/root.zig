@@ -5,6 +5,7 @@ pub const rating = @import("rating.zig");
 pub const history = @import("history.zig");
 pub const schedule = @import("schedule.zig");
 pub const parameters = @import("parameters.zig");
+pub const evaluation = @import("evaluation.zig");
 pub const engine = @import("engine.zig");
 pub const registry = @import("registry.zig");
 pub const compare = @import("compare.zig");
@@ -20,6 +21,8 @@ pub const Rating = rating.Rating;
 pub const HistoryEntry = history.Entry;
 pub const Candidate = schedule.Candidate;
 pub const Schedule = schedule.Schedule;
+pub const EvaluationMetrics = evaluation.Metrics;
+pub const EvaluationComparison = evaluation.Comparison;
 pub const Engine = engine.Engine;
 
 test {

@@ -139,5 +139,6 @@ pub const migration_v2 =
     \\    generation_key TEXT NOT NULL UNIQUE
     \\);
     \\CREATE INDEX IF NOT EXISTS generated_cards_note_idx ON generated_cards(note_id, template_ordinal);
+    \\CREATE INDEX IF NOT EXISTS reviews_time_card_rating_idx ON reviews(reviewed_at_ms, card_id, rating);
     \\PRAGMA user_version = 2;
 ;
