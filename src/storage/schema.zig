@@ -1,4 +1,4 @@
-pub const current_version: i32 = 2;
+pub const current_version: i32 = 3;
 
 pub const migration_v1 =
     \\PRAGMA foreign_keys = ON;
@@ -140,4 +140,10 @@ pub const migration_v2 =
     \\);
     \\CREATE INDEX IF NOT EXISTS generated_cards_note_idx ON generated_cards(note_id, template_ordinal);
     \\PRAGMA user_version = 2;
+;
+
+pub const migration_v3 =
+    \\CREATE INDEX IF NOT EXISTS reviews_time_card_rating_idx
+    \\ON reviews(reviewed_at_ms, card_id, rating);
+    \\PRAGMA user_version = 3;
 ;
