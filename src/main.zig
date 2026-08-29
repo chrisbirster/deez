@@ -4,8 +4,11 @@ const deez = @import("deez");
 
 fn writeHelp(out: *Io.Writer, target: deez.thrawn_cli.Help) !void {
     switch (target) {
-        .general => try out.print("{s}\n{s}\n{s}\n{s}\n{s}\n{s}", .{
+        .general => try out.print("{s}\n{s}\n{s}\n{s}\n{s}\n{s}\n{s}\n{s}\n{s}", .{
             deez.cli.help_text,
+            deez.author_cli.help_text,
+            deez.edit_cli.help_text,
+            deez.stats_cli.help_text,
             deez.notes_cli.help_text,
             deez.backup_cli.help_text,
             deez.rich_cli.help_text,
@@ -57,6 +60,13 @@ fn isBackupUsageError(err: anyerror) bool {
     };
 }
 
+fn isLegacyOptionalReverseAuthoring(args: []const []const u8) bool {
+    return args.len >= 5 and
+        std.mem.eql(u8, args[1], "note") and
+        std.mem.eql(u8, args[2], "add") and
+        std.mem.eql(u8, args[4], "optional-reverse");
+}
+
 pub fn main(init: std.process.Init) !void {
     const arena = init.arena.allocator();
     const raw_args = try init.minimal.args.toSlice(arena);
@@ -77,6 +87,46 @@ pub fn main(init: std.process.Init) !void {
             }
         };
         return;
+    }
+
+    if (deez.stats_cli.isCommand(args)) {
+        deez.stats_cli.run(init, args) catch |err| {
+            switch (err) {
+                error.InvalidArguments, error.InvalidId, error.InvalidStatsWindow => printRawErrorAndExit(init, err, deez.stats_cli.help_text),
+                else => return err,
+            }
+        };
+        return;
+    }
+
+    if (deez.author_cli.isCommand(args)) {
+        deez.author_cli.run(init, args) catch |err| {
+            switch (err) {
+                error.InvalidArguments, error.InvalidId, error.DeckNotFound => printRawErrorAndExit(init, err, deez.author_cli.help_text),
+                else => return err,
+            }
+        };
+        return;
+    }
+
+    if (deez.edit_cli.isCommand(args)) {
+        deez.edit_cli.run(init, args) catch |err| {
+            switch (err) {
+                error.InvalidArguments,
+                error.InvalidId,
+                error.DeckNotFound,
+                error.NoteNotFound,
+                error.NoDecks,
+                error.NoEditableNotes,
+                => printRawErrorAndExit(init, err, deez.edit_cli.help_text),
+                else => return err,
+            }
+        };
+        return;
+    }
+
+    if (isLegacyOptionalReverseAuthoring(args)) {
+        printRawErrorAndExit(init, error.UnknownNoteType, deez.cli.helpText(.note));
     }
 
     var route = deez.thrawn_cli.parse(arena, args) catch |err| {
