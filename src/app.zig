@@ -4,6 +4,7 @@ const cli = @import("cli.zig");
 const config = @import("config.zig");
 const content = @import("content.zig");
 const card_types = @import("card_types.zig");
+const note_mutation = @import("note_mutation.zig");
 const deck_json = @import("deck_json.zig");
 const nut = @import("nut.zig");
 const fsrs = @import("fsrs/root.zig");
@@ -209,7 +210,18 @@ fn runWithStore(
             try out.print("Created note {d} ({d} cards).\n", .{ result.note_id, result.card_ids.len });
         },
         .note_edit => |args| {
-            const ids = try card_types.update(allocator, store, args.deck_id, args.note_id, args.fields, "[]", now_ms);
+            const content_store = storage.ContentStore.init(store);
+            const note = (try content_store.getNote(allocator, args.note_id)) orelse return error.NoteNotFound;
+            defer note.deinit(allocator);
+            const ids = try note_mutation.update(
+                allocator,
+                store,
+                args.deck_id,
+                args.note_id,
+                args.fields,
+                note.tags_json,
+                now_ms,
+            );
             defer allocator.free(ids);
             try out.print("Updated note {d} ({d} cards).\n", .{ args.note_id, ids.len });
         },
@@ -324,12 +336,18 @@ fn runWithStore(
             defer allocator.free(views);
             const parameters = try baseParameters(store, args.deck_id, now_ms);
             const metrics = try fsrs.v7.evaluator.evaluate(views, parameters, .{});
-            try out.print("Examples: {d}\nLog loss: {d:.6}\nRMSE: {d:.6}\nCalibration error: {d:.6}\n", .{
-                metrics.examples,
-                metrics.log_loss,
-                metrics.rmse,
-                metrics.calibration_error,
-            });
+            try out.print(
+                "Examples: {d}\nLog loss: {d:.6}\nBrier score: {d:.6}\nRMSE: {d:.6}\nMean predicted recall: {d:.6}\nMean observed recall: {d:.6}\nCalibration error: {d:.6}\n",
+                .{
+                    metrics.examples,
+                    metrics.log_loss,
+                    metrics.brier_score,
+                    metrics.rmse,
+                    metrics.mean_predicted,
+                    metrics.mean_observed,
+                    metrics.calibration_error,
+                },
+            );
         },
         .fsrs_simulate => |args| {
             var parameters: fsrs.v7.Parameters = .{};
