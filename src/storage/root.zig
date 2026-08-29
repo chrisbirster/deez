@@ -39,6 +39,14 @@ pub const HistoricalStats = history_report.HistoricalStats;
 
 pub const IntegrityResult = recovery.IntegrityResult;
 
+fn ensureSqliteAnalyticsIndexes(db: *Db) !void {
+    const sql = "CREATE INDEX IF NOT EXISTS reviews_time_card_rating_idx ON reviews(reviewed_at_ms, card_id, rating);";
+    var error_message: [*sqlite.c]u8 = null;
+    const result = sqlite.c.sqlite3_exec(db.handle, sql.ptr, null, null, &error_message);
+    if (error_message != null) sqlite.c.sqlite3_free(error_message);
+    if (result != sqlite.c.SQLITE_OK) return error.SqliteIndexSetupFailed;
+}
+
 pub fn historicalStats(
     allocator: std.mem.Allocator,
     storage_store: *Store,
@@ -46,6 +54,10 @@ pub fn historicalStats(
     start_ms: ?i64,
     end_ms_exclusive: i64,
 ) !HistoricalStats {
+    switch (storage_store.*) {
+        .sqlite => |db| try ensureSqliteAnalyticsIndexes(db),
+        .mongodb => {},
+    }
     const owned = try storage_store.histories(allocator, deck_id);
     defer owned.deinit(allocator);
     const views = try allocator.alloc([]const @import("../fsrs/root.zig").HistoryEntry, owned.histories.len);
