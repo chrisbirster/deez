@@ -63,7 +63,7 @@ pub const Command = union(enum) {
         order: StudyOrder,
         shuffle: bool,
     },
-    stats: struct { deck_id: ?DeckId, json: bool, window: StatsWindow },
+    stats: struct { deck_id: ?DeckId, json: bool, window: StatsWindow = .all },
     inspect: struct { card_id: CardId, json: bool },
     fsrs_optimize: struct { deck_id: ?DeckId, recency_half_life_days: ?f64 },
     fsrs_evaluate: struct { deck_id: ?DeckId },
