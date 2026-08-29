@@ -18,6 +18,8 @@ pub const backup = @import("backup.zig");
 pub const recovery = @import("recovery.zig");
 pub const migration_commit = @import("migration_commit.zig");
 
+const c = sqlite.c;
+
 pub const Db = sqlite.Db;
 pub const Store = store.Store;
 pub const ContentStore = content_store.ContentStore;
@@ -41,10 +43,10 @@ pub const IntegrityResult = recovery.IntegrityResult;
 
 fn ensureSqliteAnalyticsIndexes(db: *Db) !void {
     const sql = "CREATE INDEX IF NOT EXISTS reviews_time_card_rating_idx ON reviews(reviewed_at_ms, card_id, rating);";
-    var error_message: [*sqlite.c]u8 = null;
-    const result = sqlite.c.sqlite3_exec(db.handle, sql.ptr, null, null, &error_message);
-    if (error_message != null) sqlite.c.sqlite3_free(error_message);
-    if (result != sqlite.c.SQLITE_OK) return error.SqliteIndexSetupFailed;
+    var error_message: [*c]u8 = null;
+    const result = c.sqlite3_exec(db.handle, sql.ptr, null, null, &error_message);
+    if (error_message != null) c.sqlite3_free(error_message);
+    if (result != c.SQLITE_OK) return error.SqliteIndexSetupFailed;
 }
 
 fn ensureMongoAnalyticsIndexes(mongo: *MongoStore) !void {
