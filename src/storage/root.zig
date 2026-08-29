@@ -13,6 +13,7 @@ pub const note_type_store = @import("note_type_store.zig");
 pub const generated_card_store = @import("generated_card_store.zig");
 pub const catalog = @import("catalog.zig");
 pub const report = @import("report.zig");
+pub const history_report = @import("history_report.zig");
 pub const backup = @import("backup.zig");
 pub const recovery = @import("recovery.zig");
 pub const migration_commit = @import("migration_commit.zig");
@@ -34,8 +35,24 @@ pub const Report = report.Report;
 pub const DeckSummary = report.DeckSummary;
 pub const Stats = report.Stats;
 pub const OwnedHistories = report.OwnedHistories;
+pub const HistoricalStats = history_report.HistoricalStats;
 
 pub const IntegrityResult = recovery.IntegrityResult;
+
+pub fn historicalStats(
+    allocator: std.mem.Allocator,
+    storage_store: *Store,
+    deck_id: ?u64,
+    start_ms: ?i64,
+    end_ms_exclusive: i64,
+) !HistoricalStats {
+    const owned = try storage_store.histories(allocator, deck_id);
+    defer owned.deinit(allocator);
+    const views = try allocator.alloc([]const @import("../fsrs/root.zig").HistoryEntry, owned.histories.len);
+    defer allocator.free(views);
+    for (owned.histories, 0..) |history, index| views[index] = history;
+    return history_report.calculate(allocator, views, start_ms, end_ms_exclusive);
+}
 
 pub fn checkIntegrity(allocator: std.mem.Allocator, db: *Db) !IntegrityResult {
     return recovery.check(allocator, db);
