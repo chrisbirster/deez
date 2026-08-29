@@ -8,6 +8,7 @@ const web_assets = @import("web_assets.zig");
 const web_cards = @import("web_cards.zig");
 const web_media = @import("web_media.zig");
 const web_notes = @import("web_notes.zig");
+const web_stats = @import("web_stats.zig");
 const web_study = @import("web_study.zig");
 
 const Io = std.Io;
@@ -17,10 +18,16 @@ pub const api_version = "v1";
 pub const version = build_options.version;
 const max_api_body_bytes: usize = 1024 * 1024;
 
+pub const Bind = enum {
+    loopback,
+    all,
+};
+
 pub const Options = struct {
     port: u16 = default_port,
     web_root: ?[]const u8 = null,
     open_browser: bool = true,
+    bind: Bind = .loopback,
 };
 
 const CapabilityField = struct {
@@ -65,14 +72,18 @@ const NoteResponse = struct {
 const Handler = struct {
     io: Io,
     port: u16,
+    bind: Bind,
     store: *storage.Store,
     web_root: ?[]const u8,
     media_root: []const u8,
     store_mutex: Io.Mutex = .init,
 
     fn requestAllowed(self: *Handler, req: *httpz.Request) bool {
-        return isAllowedHost(req.header("host"), self.port) and
-            isAllowedOrigin(req.header("origin"), self.port);
+        return switch (self.bind) {
+            .loopback => isAllowedHost(req.header("host"), self.port) and
+                isAllowedOrigin(req.header("origin"), self.port),
+            .all => isAllowedHostedRequest(req.header("host"), req.header("origin")),
+        };
     }
 
     pub fn dispatch(
@@ -99,10 +110,9 @@ const Handler = struct {
             return;
         }
 
-        // The first local API deliberately serializes requests over the shared
-        // Store. SQLite uses one connection, and this conservative boundary also
-        // avoids assuming Mongo client concurrency guarantees before they are
-        // explicitly tested.
+        // The first API deliberately serializes requests over the shared Store.
+        // SQLite uses one connection, and this conservative boundary also avoids
+        // assuming Mongo client concurrency guarantees before they are explicitly tested.
         self.store_mutex.lockUncancelable(self.io);
         defer self.store_mutex.unlock(self.io);
         try action(self, req, res);
@@ -142,12 +152,16 @@ pub fn run(init: std.process.Init, store: *storage.Store, options: Options) !voi
     var handler: Handler = .{
         .io = init.io,
         .port = options.port,
+        .bind = options.bind,
         .store = store,
         .web_root = options.web_root,
         .media_root = media_root,
     };
     var server = try httpz.Server(*Handler).init(init.io, init.gpa, .{
-        .address = .localhost(options.port),
+        .address = switch (options.bind) {
+            .loopback => .localhost(options.port),
+            .all => .all(options.port),
+        },
         .workers = .{
             .max_conn = 64,
         },
@@ -178,6 +192,7 @@ pub fn run(init: std.process.Init, store: *storage.Store, options: Options) !voi
     router.get("/api/v1/health", health, .{});
     router.get("/api/v1/version", versionInfo, .{});
     router.get("/api/v1/capabilities", capabilities, .{});
+    router.get("/api/v1/stats", stats, .{});
     router.post("/api/v1/media", mediaUpload, .{});
     router.get("/api/v1/media/:hash", mediaAsset, .{});
     router.get("/api/v1/decks", decks, .{});
@@ -194,13 +209,17 @@ pub fn run(init: std.process.Init, store: *storage.Store, options: Options) !voi
     router.get("/api/v1/cards/:id/study/preview", studyPreview, .{});
     router.post("/api/v1/cards/:id/reviews", studyReview, .{});
 
+    const host = switch (options.bind) {
+        .loopback => "127.0.0.1",
+        .all => "0.0.0.0",
+    };
     if (options.web_root) |root| {
-        std.debug.print("Deez Web listening on http://127.0.0.1:{d}/ (assets: {s})\n", .{ options.port, root });
+        std.debug.print("Deez Web listening on http://{s}:{d}/ (assets: {s})\n", .{ host, options.port, root });
     } else {
-        std.debug.print("Deez Web API listening on http://127.0.0.1:{d}/ (UI assets not found)\n", .{options.port});
+        std.debug.print("Deez Web API listening on http://{s}:{d}/ (UI assets not found)\n", .{ host, options.port });
     }
 
-    if (options.web_root != null and options.open_browser) {
+    if (options.bind == .loopback and options.web_root != null and options.open_browser) {
         const listen_thread = try server.listenInNewThread();
         const url = try std.fmt.allocPrint(init.arena.allocator(), "http://127.0.0.1:{d}/", .{options.port});
         browser.openDefault(init.io, url) catch |err| {
@@ -261,6 +280,10 @@ fn capabilities(_: *Handler, _: *httpz.Request, res: *httpz.Response) !void {
     }, .{});
 }
 
+fn stats(self: *Handler, req: *httpz.Request, res: *httpz.Response) !void {
+    try web_stats.stats(self.store, self.io, req, res);
+}
+
 fn mediaUpload(self: *Handler, req: *httpz.Request, res: *httpz.Response) !void {
     try web_media.upload(self.io, self.media_root, req, res);
 }
@@ -293,15 +316,15 @@ fn deck(self: *Handler, req: *httpz.Request, res: *httpz.Response) !void {
         try jsonError(res, 404, "deck_not_found", "Deck not found");
         return;
     };
-    const stats = try self.store.stats(nowMs(self.io), deck_id);
+    const stats_value = try self.store.stats(nowMs(self.io), deck_id);
     const notes = try storage.ContentStore.init(self.store).notesForDeck(res.arena, deck_id);
 
     try res.json(DeckResponse{
         .id = try idText(res.arena, owned.id),
         .name = owned.name,
         .note_count = notes.len,
-        .card_count = stats.card_count,
-        .due_count = stats.due_count,
+        .card_count = stats_value.card_count,
+        .due_count = stats_value.due_count,
     }, .{});
 }
 
@@ -435,7 +458,7 @@ fn jsonError(res: *httpz.Response, status: u16, code: []const u8, message: []con
 fn forbidden(res: *httpz.Response) void {
     res.status = 403;
     res.content_type = .JSON;
-    res.body = "{\"error\":{\"code\":\"forbidden_origin\",\"message\":\"Request is not from the local Deez Web origin\"}}";
+    res.body = "{\"error\":{\"code\":\"forbidden_origin\",\"message\":\"Request origin is not allowed by the Deez server\"}}";
 }
 
 fn isMediaApiPath(path: []const u8) bool {
@@ -462,6 +485,23 @@ fn isAllowedOrigin(value: ?[]const u8, port: u16) bool {
     return isAllowedHost(origin[prefix.len..], port);
 }
 
+fn isAllowedHostedRequest(host_value: ?[]const u8, origin_value: ?[]const u8) bool {
+    const host = host_value orelse return false;
+    if (host.len == 0) return false;
+    const origin = origin_value orelse return true;
+
+    const http_prefix = "http://";
+    const https_prefix = "https://";
+    const origin_host = if (std.mem.startsWith(u8, origin, https_prefix))
+        origin[https_prefix.len..]
+    else if (std.mem.startsWith(u8, origin, http_prefix))
+        origin[http_prefix.len..]
+    else
+        return false;
+
+    return std.ascii.eqlIgnoreCase(host, origin_host);
+}
+
 test "local web host validation only accepts the configured loopback endpoint" {
     try std.testing.expect(isAllowedHost("127.0.0.1:49317", 49317));
     try std.testing.expect(isAllowedHost("localhost:49317", 49317));
@@ -482,6 +522,15 @@ test "local web origin validation permits absent or exact same-origin headers" {
     try std.testing.expect(!isAllowedOrigin("http://127.0.0.1:49318", 49317));
     try std.testing.expect(!isAllowedOrigin("http://localhost:49317.evil.example", 49317));
     try std.testing.expect(!isAllowedOrigin("https://example.com", 49317));
+}
+
+test "hosted origin validation permits same-origin http and https only" {
+    try std.testing.expect(isAllowedHostedRequest("deez.run", null));
+    try std.testing.expect(isAllowedHostedRequest("deez.run", "https://deez.run"));
+    try std.testing.expect(isAllowedHostedRequest("deez.run:8080", "http://deez.run:8080"));
+    try std.testing.expect(!isAllowedHostedRequest(null, "https://deez.run"));
+    try std.testing.expect(!isAllowedHostedRequest("deez.run", "https://evil.example"));
+    try std.testing.expect(!isAllowedHostedRequest("deez.run", "ftp://deez.run"));
 }
 
 test "media API path covers the collection and hash resources only" {
