@@ -129,7 +129,7 @@ pub fn importNotes(
 ) !usize {
     var card_count: usize = 0;
     for (notes) |note| {
-        const kind = try content.BuiltInNoteType.parse(note.note_type);
+        const kind = try content.BuiltInNoteType.parseStored(note.note_type);
         const generated = try card_types.create(
             allocator,
             store,
@@ -170,4 +170,16 @@ test "portable note type slugs include interaction types" {
     try std.testing.expectEqualStrings("multiple-select", try slugForNoteType(7));
     try std.testing.expectEqualStrings("ordering", try slugForNoteType(8));
     try std.testing.expectEqualStrings("image-occlusion", try slugForNoteType(9));
+}
+
+test "portable import accepts legacy optional reverse" {
+    var db = try storage.Db.open(":memory:");
+    defer db.close();
+    try db.migrate();
+    var store: storage.Store = .{ .sqlite = &db };
+    const deck_id = try store.createDeck("legacy", 0);
+    const fields = [_][]const u8{ "front", "back", "yes" };
+    const notes = [_]NoteInput{.{ .note_type = "optional-reverse", .fields = &fields }};
+    const count = try importNotes(std.testing.allocator, &store, deck_id, &notes, 0);
+    try std.testing.expectEqual(@as(usize, 2), count);
 }
