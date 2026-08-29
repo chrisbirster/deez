@@ -86,6 +86,29 @@ pub fn checkIntegrity(allocator: std.mem.Allocator, db: *Db) !IntegrityResult {
     return recovery.check(allocator, db);
 }
 
+test "historical stats recreates SQLite analytics index for an existing database" {
+    var db = try Db.open(":memory:");
+    defer db.close();
+    try db.migrate();
+
+    var error_message: [*c]u8 = null;
+    const drop_sql = "DROP INDEX IF EXISTS reviews_time_card_rating_idx;";
+    try std.testing.expectEqual(c.SQLITE_OK, c.sqlite3_exec(db.handle, drop_sql.ptr, null, null, &error_message));
+    if (error_message != null) c.sqlite3_free(error_message);
+
+    const deck_id = try db.createDeck("history-index", 0);
+    const card_id = try db.createCard(deck_id, "q", "a", 0);
+    _ = try db.appendReview(card_id, .good, 1, null, null);
+    var storage_store: Store = .{ .sqlite = &db };
+    _ = try historicalStats(std.testing.allocator, &storage_store, null, null, 2);
+
+    var stmt: ?*c.sqlite3_stmt = null;
+    const query = "SELECT 1 FROM sqlite_master WHERE type='index' AND name='reviews_time_card_rating_idx';";
+    try std.testing.expectEqual(c.SQLITE_OK, c.sqlite3_prepare_v2(db.handle, query.ptr, -1, &stmt, null));
+    defer _ = c.sqlite3_finalize(stmt);
+    try std.testing.expectEqual(c.SQLITE_ROW, c.sqlite3_step(stmt));
+}
+
 test {
     std.testing.refAllDecls(@This());
 }
