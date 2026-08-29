@@ -47,6 +47,20 @@ fn ensureSqliteAnalyticsIndexes(db: *Db) !void {
     if (result != sqlite.c.SQLITE_OK) return error.SqliteIndexSetupFailed;
 }
 
+fn ensureMongoAnalyticsIndexes(mongo: *MongoStore) !void {
+    try mongo.client.createIndex(
+        mongo.client.databaseName(),
+        "reviews",
+        .{
+            .reviewed_at_ms = @as(i32, 1),
+            .card_id = @as(i32, 1),
+            .rating = @as(i32, 1),
+        },
+        "review_time_card_rating",
+        .{},
+    );
+}
+
 pub fn historicalStats(
     allocator: std.mem.Allocator,
     storage_store: *Store,
@@ -56,7 +70,7 @@ pub fn historicalStats(
 ) !HistoricalStats {
     switch (storage_store.*) {
         .sqlite => |db| try ensureSqliteAnalyticsIndexes(db),
-        .mongodb => {},
+        .mongodb => |*mongo| try ensureMongoAnalyticsIndexes(mongo),
     }
     const owned = try storage_store.histories(allocator, deck_id);
     defer owned.deinit(allocator);
