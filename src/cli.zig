@@ -23,6 +23,14 @@ pub const StudyOrder = enum {
     new_first,
 };
 
+pub const StatsWindow = enum {
+    all,
+    today,
+    week,
+    month,
+    year,
+};
+
 /// Parsed Deez application commands. Thrawn owns CLI mechanics and translates
 /// the selected command tree node into this domain command union.
 pub const Command = union(enum) {
@@ -55,7 +63,7 @@ pub const Command = union(enum) {
         order: StudyOrder,
         shuffle: bool,
     },
-    stats: struct { deck_id: ?DeckId, json: bool },
+    stats: struct { deck_id: ?DeckId, json: bool, window: StatsWindow },
     inspect: struct { card_id: CardId, json: bool },
     fsrs_optimize: struct { deck_id: ?DeckId, recency_half_life_days: ?f64 },
     fsrs_evaluate: struct { deck_id: ?DeckId },
@@ -80,13 +88,13 @@ pub const help_text =
     \\  deez deck delete <deck-id> --yes
     \\  deez deck export <deck-id> > deck.json
     \\  deez deck import <deck.json|deck.nut>
-    \\  deez note add <deck-id> <basic|reverse|optional-reverse|cloze|type-answer> <fields...>
+    \\  deez note add <deck-id> <note-type> <fields...>
     \\  deez note edit <deck-id> <note-id> <fields...>
     \\  deez card add <deck-id> <question> <answer>
     \\  deez card edit <card-id> <question> <answer>
     \\  deez card delete <card-id> --yes
     \\  deez study <deck-id> [--new-limit <count>] [--order due|reviews-first|new-first] [--shuffle]
-    \\  deez stats [deck-id] [--json]
+    \\  deez stats [deck-id] [--period all|today|week|month|year] [--json]
     \\  deez inspect <card-id> [--json]
     \\  deez fsrs optimize [deck-id] [--recency]
     \\  deez fsrs evaluate [deck-id]
@@ -119,10 +127,15 @@ const note_help =
     \\Note commands:
     \\  deez note add <deck-id> basic <front> <back>
     \\  deez note add <deck-id> reverse <front> <back>
-    \\  deez note add <deck-id> optional-reverse <front> <back> <add-reverse>
     \\  deez note add <deck-id> cloze <text> <extra>
     \\  deez note add <deck-id> type-answer <front> <back>
+    \\  deez note add <deck-id> multiple-choice <fields...>
+    \\  deez note add <deck-id> multiple-select <fields...>
+    \\  deez note add <deck-id> ordering <fields...>
+    \\  deez note add <deck-id> image-occlusion <fields...>
     \\  deez note edit <deck-id> <note-id> <fields...>
+    \\
+    \\Optional reverse is retained only for reading older Deez data and is not authorable.
 ;
 
 const card_help =
@@ -140,7 +153,12 @@ const study_help =
     \\Defaults preserve timestamp order and do not limit new cards or shuffle.
 ;
 
-const stats_help = "Usage: deez stats [deck-id] [--json]\n";
+const stats_help =
+    \\Stats command:
+    \\  deez stats [deck-id] [--period all|today|week|month|year] [--json]
+    \\
+    \\The summary keeps current deck/card/due totals and adds immutable review-history metrics.
+;
 const inspect_help = "Usage: deez inspect <card-id> [--json]\n";
 
 const fsrs_help =
