@@ -17,6 +17,7 @@ pub const default_port: u16 = 49317;
 pub const api_version = "v1";
 pub const version = build_options.version;
 const max_api_body_bytes: usize = 1024 * 1024;
+const content_security_policy = "default-src 'self'; base-uri 'none'; connect-src 'self'; font-src 'self'; form-action 'self'; frame-ancestors 'none'; img-src 'self' data:; object-src 'none'; script-src 'self'; style-src 'self'";
 
 pub const Bind = enum {
     loopback,
@@ -92,6 +93,8 @@ const Handler = struct {
         req: *httpz.Request,
         res: *httpz.Response,
     ) !void {
+        applySecurityHeaders(res);
+
         if (!self.requestAllowed(req)) {
             forbidden(res);
             return;
@@ -119,6 +122,8 @@ const Handler = struct {
     }
 
     pub fn notFound(self: *Handler, req: *httpz.Request, res: *httpz.Response) !void {
+        applySecurityHeaders(res);
+
         if (!self.requestAllowed(req)) {
             forbidden(res);
             return;
@@ -443,6 +448,15 @@ fn idText(allocator: std.mem.Allocator, id: u64) ![]const u8 {
 
 fn nowMs(io: Io) i64 {
     return Io.Timestamp.now(io, .real).toSeconds() * 1_000;
+}
+
+fn applySecurityHeaders(res: *httpz.Response) void {
+    res.header("Content-Security-Policy", content_security_policy);
+    res.header("Cross-Origin-Opener-Policy", "same-origin");
+    res.header("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+    res.header("Referrer-Policy", "strict-origin-when-cross-origin");
+    res.header("X-Content-Type-Options", "nosniff");
+    res.header("X-Frame-Options", "DENY");
 }
 
 fn jsonError(res: *httpz.Response, status: u16, code: []const u8, message: []const u8) !void {
