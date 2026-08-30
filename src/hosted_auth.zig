@@ -1,5 +1,6 @@
 const std = @import("std");
 const bongo = @import("bongo");
+const email_sender = @import("email_sender.zig");
 const mongodb = @import("storage/mongodb.zig");
 const media = @import("media.zig");
 
@@ -30,8 +31,6 @@ pub const Error = error{
 
 pub const Config = struct {
     base_url: []const u8,
-    resend_api_key: []const u8,
-    from_email: []const u8,
 };
 
 pub const User = struct {
@@ -56,9 +55,22 @@ pub const Service = struct {
     allocator: Allocator,
     mongo: *mongodb.Store,
     config: Config,
+    sender: *email_sender.Sender,
 
-    pub fn init(io: Io, allocator: Allocator, mongo: *mongodb.Store, config: Config) Service {
-        return .{ .io = io, .allocator = allocator, .mongo = mongo, .config = config };
+    pub fn init(
+        io: Io,
+        allocator: Allocator,
+        mongo: *mongodb.Store,
+        config: Config,
+        sender: *email_sender.Sender,
+    ) Service {
+        return .{
+            .io = io,
+            .allocator = allocator,
+            .mongo = mongo,
+            .config = config,
+            .sender = sender,
+        };
     }
 
     fn database(self: *Service) []const u8 {
@@ -337,30 +349,7 @@ pub const Service = struct {
     fn sendMagicLink(self: *Service, allocator: Allocator, email: []const u8, token: []const u8) !void {
         const link = try std.fmt.allocPrint(allocator, "{s}/auth/magic?token={s}", .{ self.config.base_url, token });
         defer allocator.free(link);
-        const body = try std.fmt.allocPrint(
-            allocator,
-            "{{\"from\":\"{s}\",\"to\":[\"{s}\"],\"subject\":\"Sign in to Deez\",\"text\":\"Sign in to Deez:\\n\\n{s}\\n\\nThis link expires in 15 minutes. If you did not request it, you can ignore this email.\"}}",
-            .{ self.config.from_email, email, link },
-        );
-        defer allocator.free(body);
-        const auth_header = try std.fmt.allocPrint(allocator, "Bearer {s}", .{self.config.resend_api_key});
-        defer allocator.free(auth_header);
-
-        var client: std.http.Client = .{ .allocator = self.allocator, .io = self.io };
-        defer client.deinit();
-        const headers = [_]std.http.Header{
-            .{ .name = "Authorization", .value = auth_header },
-            .{ .name = "Content-Type", .value = "application/json" },
-            .{ .name = "User-Agent", .value = "deez.run/1" },
-        };
-        const uri = try std.Uri.parse("https://api.resend.com/emails");
-        var request = try client.request(.POST, uri, .{ .extra_headers = &headers });
-        defer request.deinit();
-        try request.sendBodyComplete(body);
-        var redirect_buffer: [4096]u8 = undefined;
-        const response = try request.receiveHead(&redirect_buffer);
-        const status = @intFromEnum(response.head.status);
-        if (status < 200 or status >= 300) return error.EmailDeliveryFailed;
+        self.sender.send(allocator, email, link) catch return error.EmailDeliveryFailed;
     }
 };
 
