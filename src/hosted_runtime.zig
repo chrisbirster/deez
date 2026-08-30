@@ -11,7 +11,9 @@ pub fn run(
     const base_url_raw = init.environ_map.get("DEEZ_AUTH_BASE_URL") orelse return error.MissingHostedAuthConfiguration;
     const api_key = init.environ_map.get("DEEZ_RESEND_API_KEY") orelse return error.MissingHostedAuthConfiguration;
     const from_email = init.environ_map.get("DEEZ_AUTH_FROM") orelse return error.MissingHostedAuthConfiguration;
-    const base_url = std.mem.trimRight(u8, base_url_raw, "/");
+    var base_url_end = base_url_raw.len;
+    while (base_url_end > 0 and base_url_raw[base_url_end - 1] == '/') base_url_end -= 1;
+    const base_url = base_url_raw[0..base_url_end];
 
     if (!std.mem.startsWith(u8, base_url, "https://") or base_url.len <= "https://".len) {
         return error.InvalidHostedAuthBaseUrl;
