@@ -63,9 +63,13 @@ pub const Relay = struct {
         var redirect_buffer: [4096]u8 = undefined;
         const response = request.receiveHead(&redirect_buffer) catch return error.EmailDeliveryFailed;
         const status = @intFromEnum(response.head.status);
-        if (status < 200 or status >= 300) return error.EmailDeliveryFailed;
+        if (!isAcceptedStatus(status)) return error.EmailDeliveryFailed;
     }
 };
+
+fn isAcceptedStatus(status: u16) bool {
+    return status == 202;
+}
 
 pub const Recording = struct {
     allocator: Allocator,
@@ -113,4 +117,13 @@ test "recording sender captures the narrow magic-link payload" {
         "https://deez.run/auth/magic?token=abc123",
         recording.last_magic_link.?,
     );
+}
+
+test "relay accepts only HTTP 202" {
+    try std.testing.expect(isAcceptedStatus(202));
+    try std.testing.expect(!isAcceptedStatus(200));
+    try std.testing.expect(!isAcceptedStatus(201));
+    try std.testing.expect(!isAcceptedStatus(204));
+    try std.testing.expect(!isAcceptedStatus(400));
+    try std.testing.expect(!isAcceptedStatus(500));
 }
