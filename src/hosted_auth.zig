@@ -124,7 +124,8 @@ pub const Service = struct {
             q.set(.{ .used_at_ms = @as(?i64, now_ms) }),
             false,
         );
-        used.deinit();
+        defer used.deinit();
+        if (used.matched_count != 1) return error.UsedMagicLink;
 
         const existing = try self.findUserByEmail(allocator, email);
         const is_new = existing == null;
