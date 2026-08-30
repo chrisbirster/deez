@@ -1,6 +1,7 @@
 const std = @import("std");
 
 const config = @import("config.zig");
+const hosted_runtime = @import("hosted_runtime.zig");
 const storage = @import("storage/root.zig");
 const web = @import("web.zig");
 const web_assets = @import("web_assets.zig");
@@ -86,6 +87,10 @@ pub fn run(init: std.process.Init, options: Options) !void {
             const mongo = try storage.MongoStore.connect(init.io, allocator, selection.mongo_uri.?);
             var store: storage.Store = .{ .mongodb = mongo };
             defer store.deinit();
+            if (options.bind == .all) {
+                try hosted_runtime.run(init, &store, .{ .port = options.port, .web_root = web_root });
+                return;
+            }
             try web.run(init, &store, .{
                 .port = options.port,
                 .web_root = web_root,
@@ -94,6 +99,7 @@ pub fn run(init: std.process.Init, options: Options) !void {
             });
         },
         .sqlite => {
+            if (options.bind == .all) return error.HostedRequiresMongoDB;
             const db_path_z = try arena.dupeZ(u8, selection.sqlite_path.?);
             var db = try storage.Db.open(db_path_z);
             defer db.close();
