@@ -281,7 +281,6 @@ zig build test
 MongoDB/Bongo acceptance:
 
 ```bash
-deez_version=$(cat VERSION)
 zig build mongo-integration-test
 ```
 
