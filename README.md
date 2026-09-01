@@ -8,7 +8,7 @@ Deez is a terminal-first spaced-repetition system written in Zig. It uses FSRS f
 
 - Zig: **0.16.0** for development/builds
 - Scheduler: **FSRS-7**
-- MongoDB driver: **Bongo v0.4.0**, pinned to commit `8184b6266bab78fd3eb7fd8d2318f79f90e51937`
+- MongoDB driver: **Bongo v0.6.0**, pinned to commit `1c7bdf9eb5b1c63236a432333a6b26d51d1a4ae5`
 - Storage: **SQLite** or **MongoDB**
 - FSRS-8: not implemented until a published specification/reference implementation exists
 
@@ -117,31 +117,35 @@ deez study 1 --shuffle
 
 ## Shareable deck files
 
-Deez supports two content-only deck formats: normal `.json` and native `.nut` files. Both can be imported into either SQLite or MongoDB and both intentionally exclude personal review history and FSRS state.
+Deez supports two content-only deck formats: normal `.json` and native `.nut` files. Current exports use logical-note **version 2** for both formats. Legacy version 1 card-only files remain import-compatible. Both formats can be imported into either SQLite or MongoDB and intentionally exclude personal review history and FSRS state.
 
 ### JSON
 
-A JSON deck is one document containing the deck name and cards:
+A JSON deck is one document. Version 2 stores logical notes instead of generated cards:
 
 ```json
 {
   "format": "deez.deck",
-  "version": 1,
+  "version": 2,
   "deck": {
     "name": "Zig Basics",
-    "cards": [
+    "notes": [
       {
-        "question": "What is Zig?",
-        "answer": "A systems programming language"
+        "note_type": "basic",
+        "fields": ["What is Zig?", "A systems programming language"],
+        "tags_json": "[]"
       },
       {
-        "question": "What is comptime?",
-        "answer": "Compile-time execution"
+        "note_type": "cloze",
+        "fields": ["Zig uses {{c1::explicit allocators}}.", "Memory"],
+        "tags_json": "[]"
       }
     ]
   }
 }
 ```
+
+Generated study cards are rebuilt from each note type during import, so the file does not become a second source of truth for rendered cards or scheduling state.
 
 Export and import:
 
@@ -152,13 +156,21 @@ deez deck import zig-basics.json
 
 ### `.nut`
 
-`.nut` is Deez's native line-oriented deck format. It is NDJSON: every non-empty line is an ordinary JSON object.
+`.nut` is Deez's native human-readable, line-oriented format. Version 2 is NDJSON: the first non-empty record is the deck header and each following record is one **logical note**.
 
 ```text
-{"kind":"deck","format":"deez.nut","version":1,"name":"Zig Basics"}
-{"kind":"card","question":"What is Zig?","answer":"A systems programming language"}
-{"kind":"card","question":"What is comptime?","answer":"Compile-time execution"}
+{"kind":"deck","format":"deez.nut","version":2,"name":"Zig Basics"}
+{"kind":"note","note_type":"basic","fields":["What is Zig?","A systems programming language"],"tags_json":"[]"}
+{"kind":"note","note_type":"cloze","fields":["Zig uses {{c1::explicit allocators}}.","Memory"],"tags_json":"[]"}
 ```
+
+A reverse note is likewise stored once as a logical note even though it generates two study cards:
+
+```text
+{"kind":"note","note_type":"basic-reverse","fields":["Capital of France","Paris"],"tags_json":"[]"}
+```
+
+Generated cards are recreated from the note type and templates during import. Stable generated-card semantics therefore survive round trips without embedding another user's due dates, stability, difficulty, review history, or scheduler cache.
 
 Export and import:
 
@@ -173,13 +185,15 @@ The normal deck importer also recognizes the `.nut` extension:
 deez deck import zig-basics.nut
 ```
 
+Version 2 supports Deez's built-in logical note types, including basic, reverse, cloze, type-answer, multiple-choice, multiple-select, ordering, and image-occlusion. Version 1 card-based `.nut` files remain import-compatible.
+
 Import always creates a new deck in the currently configured database, whether that database is SQLite or MongoDB.
 
 Shared deck files are intentionally **content-only**. They do not contain the previous user's review history, due dates, stability, difficulty, or other personal FSRS state. A downloaded deck therefore starts fresh for the person importing it.
 
 Use Deez backup/restore—not JSON or `.nut`—when you need a full-fidelity copy of your own study data and scheduler history.
 
-See `docs/nut-format.md` for the `.nut` format contract.
+See `docs/nut-format.md` for the `.nut` format contract and `docs/interactions.md` for the structured interactive note fields.
 
 ## Inspect and stats
 
@@ -288,11 +302,11 @@ Set `DEEZ_MONGO_BENCH_URI` to include the Mongo due-queue workload. See `docs/be
 
 - `docs/cli.md` — CLI reference
 - `docs/nut-format.md` — native `.nut` NDJSON deck format
+- `docs/interactions.md` — structured interactive note/card contract
 - `docs/fsrs-7-parity.md` — FSRS-7 reference/parity policy
 - `docs/optimizer.md` — optimization and evaluation methodology
 - `docs/interchange.md` — full-fidelity interchange format and migration safety
 - `docs/mongodb.md` — MongoDB/Bongo persistence and recovery
-- `docs/bongo-0.4-integration.md` — pinned Bongo 0.4.0 consumer boundary
 - `docs/benchmarks.md` — benchmark workloads and regression policy
 - `docs/fsrs-8-checklist.md` — requirements for a future published FSRS-8
 - `docs/release-checklist.md` — release gate

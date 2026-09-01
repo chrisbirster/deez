@@ -1,0 +1,56 @@
+name: Homebrew consumption smoke
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - Formula/deez.rb
+
+jobs:
+  install-and-study:
+    runs-on: macos-15
+    steps:
+      - name: Start from a clean Deez tap/install state
+        shell: bash
+        run: |
+          set -euo pipefail
+          brew uninstall --force deez >/dev/null 2>&1 || true
+          brew untap chrisbirster/deez >/dev/null 2>&1 || true
+
+      - name: Install Deez through Homebrew
+        shell: bash
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+        run: |
+          set -euo pipefail
+          brew tap chrisbirster/deez https://github.com/chrisbirster/deez
+          brew install chrisbirster/deez/deez
+          brew test chrisbirster/deez/deez
+          command -v deez
+          deez --help >/dev/null
+
+      - name: Exercise persisted study state across processes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          smoke_home=$(mktemp -d)
+          trap 'rm -rf "$smoke_home"' EXIT
+          export DEEZ_STORAGE=sqlite
+          export DEEZ_DB="$smoke_home/deez.db"
+
+          deez deck add "Homebrew Release Smoke"
+          deez note add 1 basic "What is Deez?" "A spaced-repetition system"
+          deez decks | grep -q "Homebrew Release Smoke"
+          deez notes 1 | grep -q "What is Deez?"
+
+          printf '\n4\n' | deez study 1 --new-limit 1 | tee "$smoke_home/first-study.txt"
+          grep -q "scheduled in" "$smoke_home/first-study.txt"
+          deez stats --json | tee "$smoke_home/stats.json"
+          grep -q '"reviews":1' "$smoke_home/stats.json"
+
+          # This is a new Deez process reading the same SQLite database. The
+          # Easy-rated card must retain its scheduler state and no longer be due.
+          deez study 1 --new-limit 1 </dev/null | tee "$smoke_home/restarted-study.txt"
+          grep -q "No cards due." "$smoke_home/restarted-study.txt"
