@@ -1,6 +1,6 @@
-# Deez v0.1.0 release gate
+# Deez v0.2.0-rc.4.2 release gate
 
-Do not create the first Deez release tag until every required item below is checked on the final release commit.
+Do not publish `v0.2.0-rc.4.2` until every required item below is satisfied on the exact release commit.
 
 ## Scheduler correctness
 
@@ -10,11 +10,11 @@ Do not create the first Deez release tag until every required item below is chec
 - [ ] Time-series evaluation tests pass without future leakage.
 - [ ] Simulation, forecast, and retention regression tests pass.
 - [ ] Multi-engine fixture tests pass while the production registry exposes only published engines.
-- [ ] Property/fuzz smoke tests pass with no panic, NaN, infinity, negative interval, or invalid transition regression.
+- [ ] Property/fuzz smoke coverage has no panic, NaN, infinity, negative interval, or invalid transition regression.
 
 ## MongoDB / Bongo
 
-- [ ] Deez uses Bongo v0.4.0 at commit `8184b6266bab78fd3eb7fd8d2318f79f90e51937` with the pinned package hash.
+- [ ] Deez uses Bongo v0.6.0 at commit `1c7bdf9eb5b1c63236a432333a6b26d51d1a4ae5` with the pinned package hash.
 - [ ] Live replica-set integration suite passes.
 - [ ] Standalone fallback integration suite passes.
 - [ ] TLS/authentication/error propagation coverage passes.
@@ -24,8 +24,19 @@ Do not create the first Deez release tag until every required item below is chec
 - [ ] Global/group/deck parameter precedence passes.
 - [ ] Logical archive dry-run/restore passes.
 - [ ] Recovery rebuild preserves immutable review history.
-- [ ] Anki-to-Store migration is validated with MongoDB as destination.
 - [ ] Required MongoDB indexes are verified independently.
+- [ ] Rich-media `.sack` import/export passes against MongoDB.
+
+## Content, clients, and hosted boundary
+
+- [ ] JSON v2 export/import round trips logical notes and keeps JSON v1 import compatibility.
+- [ ] `.nut` v2 export/import round trips logical notes and keeps `.nut` v1 import compatibility.
+- [ ] Built-in note generation remains stable for basic, reverse, cloze, type-answer, multiple-choice, multiple-select, ordering, and image-occlusion.
+- [ ] `.sack` media hashes are verified and content-addressed media survives export/import.
+- [ ] `deez web` local browser serving and media delivery smoke tests pass.
+- [ ] `deez serve` local API remains loopback-first and its API smoke coverage passes.
+- [ ] Hosted auth/session/ownership tests pass without changing the account-free local mode.
+- [ ] The packaged macOS archives contain the Deez binary and pinned Deez Web assets.
 
 ## Data safety
 
@@ -34,6 +45,7 @@ Do not create the first Deez release tag until every required item below is chec
 - [ ] Parameter activation is explicit and previous parameter sets remain available.
 - [ ] Scheduler migration preview is side-effect free.
 - [ ] Failed migrations/restores leave source history unchanged.
+- [ ] Generated-card retirement preserves immutable review history when note edits remove variants.
 - [ ] Backup/restore and recovery documentation matches tested behavior.
 
 ## Performance
@@ -50,17 +62,42 @@ Do not create the first Deez release tag until every required item below is chec
 
 ## User experience
 
-- [ ] README installation/build instructions work from a clean checkout.
+- [ ] README installation/build instructions match the current release.
+- [ ] README and `docs/nut-format.md` document `.nut` v2 logical-note records rather than the historical v1 card format.
 - [ ] MongoDB environment examples work.
-- [ ] First deck/card/study workflow works.
+- [ ] First deck/note/study workflow works with SQLite.
 - [ ] `deez fsrs optimize --recency` matches current positional recency behavior.
 - [ ] Help output matches supported CLI syntax.
 - [ ] Stats/inspect human and JSON output work.
 - [ ] Backup/recovery/migration docs are discoverable.
 
-## Required final commands
+## Exact-SHA GitHub release matrix
 
-Run from the exact release commit:
+The release candidate SHA must have successful runs for all three push workflows:
+
+- [ ] `ci`
+  - formatting
+  - normal build and tests
+  - local Web/API/media smoke
+  - first-run and JSON/`.nut`/`.sack` smoke
+  - benchmark warm-up plus five measured runs
+  - Apple Silicon macOS release smoke
+  - Intel macOS release smoke
+- [ ] `Zig 0.16 + Bongo`
+  - `zig build test` against the pinned Bongo v0.6.0 dependency
+- [ ] `MongoDB backend`
+  - replica-set, standalone, and TLS fixtures
+  - `zig build mongo-integration-test`
+  - required indexes
+  - backup/restore
+  - rich-media `.sack`
+  - Mongo benchmark warm-up plus five measured runs
+
+Do not promote a branch merely because an earlier PR head was green. Re-run/verify these workflows after the release changes have landed on `dev`, and use that exact successful `dev` commit as the commit promoted to `main`.
+
+## Required local-equivalent commands
+
+The GitHub matrix is authoritative for services and runner-specific checks. The equivalent core commands are:
 
 ```bash
 zig fmt --check build.zig src test
@@ -70,17 +107,29 @@ zig build benchmark -Doptimize=ReleaseFast
 zig build mongo-integration-test
 ```
 
-The Mongo integration command requires the documented Mongo fixtures/CI environment. The GitHub checks for the exact commit must also be green.
+The Mongo integration command requires the documented Mongo fixtures/CI environment.
+
+## Publication and Homebrew consumption
+
+After the exact green release SHA is fast-forwarded from `dev` to `main`:
+
+- [ ] `VERSION` is exactly `0.2.0-rc.4.2`.
+- [ ] The release workflow creates annotated tag `v0.2.0-rc.4.2` on that exact SHA.
+- [ ] Apple Silicon and Intel macOS archives are published with `SHA256SUMS`.
+- [ ] The Homebrew formula on `main` is updated to the published tag and checksums.
+- [ ] A clean macOS runner taps this repository and installs Deez through Homebrew.
+- [ ] The Homebrew-installed binary completes a real SQLite deck → note → study → process restart → study persistence smoke test.
 
 ## Compatibility notes for release notes
 
 Release notes must state:
 
-- Deez version: v0.1.0;
-- supported Zig version: 0.16.0;
+- Deez version: v0.2.0-rc.4.2;
+- supported Zig version: 0.16.0 for source builds;
 - supported scheduler major(s): FSRS-7;
-- MongoDB driver: Bongo v0.4.0 at the pinned commit/hash;
-- MongoDB is the primary production validation backend;
+- MongoDB driver: Bongo v0.6.0 at commit `1c7bdf9eb5b1c63236a432333a6b26d51d1a4ae5`;
+- current JSON and `.nut` exports use logical-note version 2 while version 1 imports remain supported;
+- MongoDB is the production validation backend while SQLite remains the default local backend;
 - review history is immutable source of truth;
 - existing deck scheduler major is pinned and never silently migrated;
 - FSRS-8 is not claimed until a published implementation passes the full engine definition of done.
@@ -89,7 +138,8 @@ Release notes must state:
 
 Only after this checklist is satisfied:
 
-1. merge the release PR;
-2. verify the exact merge commit with the final validation commands;
-3. create tag `v0.1.0` on that commit;
-4. publish the prepared release notes with the compatibility guarantees above.
+1. land the release preparation on `dev`;
+2. verify the full GitHub release matrix on the exact resulting `dev` SHA;
+3. fast-forward `main` to that exact SHA;
+4. allow `.github/workflows/release.yml` to create tag `v0.2.0-rc.4.2`, publish the macOS archives/checksums, and update the Homebrew formula;
+5. require the Homebrew consumption smoke to pass before calling the release complete.
