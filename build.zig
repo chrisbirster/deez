@@ -114,6 +114,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/wasm_scheduler.zig"),
             .target = target,
             .optimize = optimize,
+            .link_libc = true,
         }),
     });
     const run_wasm_tests = b.addRunArtifact(wasm_tests);
