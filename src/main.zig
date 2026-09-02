@@ -4,7 +4,7 @@ const deez = @import("deez");
 
 fn writeHelp(out: *Io.Writer, target: deez.thrawn_cli.Help) !void {
     switch (target) {
-        .general => try out.print("{s}\n{s}\n{s}\n{s}\n{s}\n{s}\n{s}\n{s}\n{s}", .{
+        .general => try out.print("{s}\n{s}\n{s}\n{s}\n{s}\n{s}\n{s}\n{s}\n{s}\n{s}", .{
             deez.cli.help_text,
             deez.author_cli.help_text,
             deez.edit_cli.help_text,
@@ -12,6 +12,7 @@ fn writeHelp(out: *Io.Writer, target: deez.thrawn_cli.Help) !void {
             deez.notes_cli.help_text,
             deez.backup_cli.help_text,
             deez.rich_cli.help_text,
+            deez.remote_cli.help_text,
             deez.web_cli.help_text,
             deez.server.help_text,
         }),
@@ -83,6 +84,20 @@ pub fn main(init: std.process.Init) !void {
         deez.web_cli.run(init, args) catch |err| {
             switch (err) {
                 error.InvalidArguments, error.InvalidPort => printRawErrorAndExit(init, err, deez.web_cli.help_text),
+                else => return err,
+            }
+        };
+        return;
+    }
+
+    if (deez.remote_cli.isCommand(args)) {
+        deez.remote_cli.run(init, args) catch |err| {
+            switch (err) {
+                error.InvalidArguments,
+                error.InvalidMagicLink,
+                error.NotLoggedIn,
+                error.MissingCloudSession,
+                => printRawErrorAndExit(init, err, deez.remote_cli.help_text),
                 else => return err,
             }
         };
