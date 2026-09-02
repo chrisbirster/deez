@@ -31,11 +31,19 @@ const ScheduleResponse = struct {
     easy: CandidateResponse,
 };
 
+const Fsrs7ParametersResponse = struct {
+    weights: [fsrs.v7.parameters.weight_count]f64,
+    desired_retention: f64,
+    minimum_interval_days: f64,
+    maximum_interval_days: f64,
+};
+
 const PreviewResponse = struct {
     card_id: []const u8,
     review_count: usize,
     retrievability: ?f64,
     schedule: ScheduleResponse,
+    fsrs7_parameters: Fsrs7ParametersResponse,
 };
 
 const ReviewInput = struct {
@@ -99,6 +107,15 @@ fn candidateResponse(candidate: fsrs.Candidate) CandidateResponse {
         .rating = candidate.rating.value(),
         .due_at_ms = candidate.due_at_ms,
         .interval_days = candidate.interval_days,
+    };
+}
+
+fn parametersResponse(parameters: fsrs.v7.Parameters) Fsrs7ParametersResponse {
+    return .{
+        .weights = parameters.weights,
+        .desired_retention = parameters.desired_retention,
+        .minimum_interval_days = parameters.minimum_interval_days,
+        .maximum_interval_days = parameters.maximum_interval_days,
     };
 }
 
@@ -188,6 +205,7 @@ pub fn preview(
 
     const history = try store.loadHistory(res.arena, card_id);
     const result = try study_mod.Study.init(store).preview(res.arena, card_id, nowMs(io));
+    const parameters = try store.loadFsrs7Parameters(result.parameter_set_id);
     try res.json(PreviewResponse{
         .card_id = try idText(res.arena, card_id),
         .review_count = history.len,
@@ -198,6 +216,7 @@ pub fn preview(
             .good = candidateResponse(result.schedule.good),
             .easy = candidateResponse(result.schedule.easy),
         },
+        .fsrs7_parameters = parametersResponse(parameters),
     }, .{});
 }
 
@@ -283,6 +302,16 @@ test "study candidate response preserves the FSRS rating and interval" {
     try std.testing.expectEqual(@as(u8, 3), response.rating);
     try std.testing.expectEqual(@as(i64, 1234), response.due_at_ms);
     try std.testing.expectApproxEqAbs(@as(f64, 2.5), response.interval_days, 1e-12);
+}
+
+test "study preview exports the exact FSRS parameter set for offline clients" {
+    var parameters: fsrs.v7.Parameters = .{};
+    parameters.desired_retention = 0.91;
+    const response = parametersResponse(parameters);
+    try std.testing.expectEqual(parameters.weights, response.weights);
+    try std.testing.expectApproxEqAbs(@as(f64, 0.91), response.desired_retention, 1e-12);
+    try std.testing.expectEqual(parameters.minimum_interval_days, response.minimum_interval_days);
+    try std.testing.expectEqual(parameters.maximum_interval_days, response.maximum_interval_days);
 }
 
 test "study review-order parser accepts the CLI spellings" {
