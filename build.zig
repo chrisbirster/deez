@@ -56,6 +56,28 @@ pub fn build(b: *std.Build) void {
     });
     b.installArtifact(exe);
 
+    // The PWA executes the exact same FSRS-7 implementation as the native CLI.
+    // Keep this module freestanding and storage/network-free so it can be
+    // loaded from IndexedDB-backed clients without a JavaScript scheduler fork.
+    const wasm_target = b.resolveTargetQuery(.{
+        .cpu_arch = .wasm32,
+        .os_tag = .freestanding,
+    });
+    const scheduler_wasm = b.addExecutable(.{
+        .name = "deez-scheduler",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/wasm_scheduler.zig"),
+            .target = wasm_target,
+            .optimize = .ReleaseSmall,
+        }),
+    });
+    scheduler_wasm.entry = .disabled;
+    scheduler_wasm.rdynamic = true;
+    b.installArtifact(scheduler_wasm);
+
+    const wasm_step = b.step("wasm-scheduler", "Build the browser FSRS scheduler WebAssembly artifact");
+    wasm_step.dependOn(&scheduler_wasm.step);
+
     const run_step = b.step("run", "Run Deez");
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
@@ -87,9 +109,19 @@ pub fn build(b: *std.Build) void {
     const exe_tests = b.addTest(.{ .root_module = exe.root_module });
     const run_exe_tests = b.addRunArtifact(exe_tests);
 
+    const wasm_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/wasm_scheduler.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const run_wasm_tests = b.addRunArtifact(wasm_tests);
+
     const test_step = b.step("test", "Run all tests");
     test_step.dependOn(&run_mod_tests.step);
     test_step.dependOn(&run_exe_tests.step);
+    test_step.dependOn(&run_wasm_tests.step);
 
     const mongo_integration_tests = b.addTest(.{
         .root_module = b.createModule(.{
