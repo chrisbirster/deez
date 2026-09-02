@@ -1,0 +1,207 @@
+name: Two-device sync convergence
+
+on:
+  pull_request:
+    paths:
+      - 'src/remote_cli.zig'
+      - 'src/sync_guard.zig'
+      - 'src/hosted_*.zig'
+      - 'src/web*.zig'
+      - '.github/workflows/sync-convergence.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  convergence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+      - name: Install native dependencies
+        run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev jq
+      - name: Build Deez
+        run: zig build -Doptimize=ReleaseSafe
+      - name: Start MongoDB replica set
+        run: |
+          set -euo pipefail
+          docker run -d --name deez-sync-mongo -p 27017:27017 mongo:8 --replSet rs0 --bind_ip_all
+          for _ in $(seq 1 60); do
+            if docker exec deez-sync-mongo mongosh --quiet --eval 'db.adminCommand({ping:1}).ok' 2>/dev/null | grep -q '^1$'; then break; fi
+            sleep 1
+          done
+          docker exec deez-sync-mongo mongosh --quiet --eval 'rs.initiate({_id:"rs0",members:[{_id:0,host:"127.0.0.1:27017"}]})'
+          for _ in $(seq 1 60); do
+            if docker exec deez-sync-mongo mongosh --quiet --eval 'db.hello().isWritablePrimary' 2>/dev/null | grep -q '^true$'; then break; fi
+            sleep 1
+          done
+      - name: Start recording email relay and hosted server
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/deez-relay.py <<'PY'
+          import json
+          from http.server import BaseHTTPRequestHandler, HTTPServer
+
+          class Handler(BaseHTTPRequestHandler):
+              def do_POST(self):
+                  n = int(self.headers.get('content-length', '0'))
+                  body = json.loads(self.rfile.read(n))
+                  with open('/tmp/deez-magic-link', 'w', encoding='utf-8') as f:
+                      f.write(body['magic_link'])
+                  self.send_response(202)
+                  self.end_headers()
+              def log_message(self, *args):
+                  pass
+
+          HTTPServer(('127.0.0.1', 18081), Handler).serve_forever()
+          PY
+          python3 /tmp/deez-relay.py >/tmp/deez-relay.log 2>&1 &
+          echo $! >/tmp/deez-relay.pid
+
+          DEEZ_STORAGE=mongodb \
+          DEEZ_MONGO_URI='mongodb://127.0.0.1:27017/deez_sync?replicaSet=rs0' \
+          DEEZ_ALLOW_INSECURE_HOSTED_LOCALHOST='1' \
+          DEEZ_AUTH_BASE_URL='http://127.0.0.1:18080' \
+          DEEZ_EMAIL_ENDPOINT='http://127.0.0.1:18081/send' \
+          DEEZ_EMAIL_RELAY_TOKEN='ci-token' \
+          ./zig-out/bin/deez serve --host 0.0.0.0 --port 18080 >/tmp/deez-server.log 2>&1 &
+          echo $! >/tmp/deez-server.pid
+
+          for _ in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:18080/api/v1/health >/dev/null 2>&1; then break; fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:18080/api/v1/health | grep -q '"status":"ok"'
+      - name: Create one cloud account for two independent SQLite devices
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f /tmp/deez-magic-link
+          curl -fsS -X POST http://127.0.0.1:18080/api/v1/auth/magic-link \
+            -H 'content-type: application/json' \
+            --data '{"email":"sync-ci@example.com"}' >/tmp/request.json
+          for _ in $(seq 1 60); do test -s /tmp/deez-magic-link && break; sleep 0.2; done
+          test -s /tmp/deez-magic-link
+          token="$(python3 - <<'PY'
+          from urllib.parse import urlsplit, parse_qs
+          print(parse_qs(urlsplit(open('/tmp/deez-magic-link').read().strip()).query)['token'][0])
+          PY
+          )"
+          curl -fsS -D /tmp/consume.headers -o /tmp/consume.json \
+            -X POST http://127.0.0.1:18080/api/v1/auth/magic/consume \
+            -H 'content-type: application/json' \
+            --data "{\"token\":\"$token\"}"
+          session="$(tr -d '\r' </tmp/consume.headers | sed -n 's/^set-cookie: __Host-deez_session=\([^;]*\).*/\1/ip' | head -n1)"
+          test -n "$session"
+          mkdir -p /tmp/device-a/.config/deez /tmp/device-b/.config/deez
+          printf '{"version":1,"base_url":"http://127.0.0.1:18080","session":"%s"}\n' "$session" >/tmp/device-a/.config/deez/cloud.json
+          cp /tmp/device-a/.config/deez/cloud.json /tmp/device-b/.config/deez/cloud.json
+      - name: Prove A to cloud to B convergence and idempotency
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat >/tmp/sync-ci.nut <<'NUT'
+          {"kind":"deck","format":"deez.nut","version":2,"name":"Sync CI"}
+          {"kind":"note","note_type":"basic","fields":["What converges?","Immutable Deez history"],"tags_json":"[]"}
+          NUT
+          A='HOME=/tmp/device-a DEEZ_STORAGE=sqlite DEEZ_DB=/tmp/device-a/deez.db DEEZ_CLOUD_URL=http://127.0.0.1:18080'
+          B='HOME=/tmp/device-b DEEZ_STORAGE=sqlite DEEZ_DB=/tmp/device-b/deez.db DEEZ_CLOUD_URL=http://127.0.0.1:18080'
+
+          env $A ./zig-out/bin/deez deck import /tmp/sync-ci.nut
+          env $A ./zig-out/bin/deez sync | tee /tmp/a-first-sync.txt
+          grep -q '↑ 1 decks, 1 notes, 0 reviews' /tmp/a-first-sync.txt
+
+          env $B ./zig-out/bin/deez sync | tee /tmp/b-first-sync.txt
+          grep -q '↓ 1 decks, 1 notes, 0 reviews' /tmp/b-first-sync.txt
+          env $B ./zig-out/bin/deez deck export 1 >/tmp/b-before.json
+          grep -q 'Immutable Deez history' /tmp/b-before.json
+
+          env $B ./zig-out/bin/deez sync | tee /tmp/b-idempotent.txt
+          grep -q '↑ 0 decks, 0 notes, 0 reviews' /tmp/b-idempotent.txt
+          grep -q '↓ 0 decks, 0 notes, 0 reviews' /tmp/b-idempotent.txt
+      - name: Prove immutable review convergence and second-sync zero mutations
+        shell: bash
+        run: |
+          set -euo pipefail
+          A='HOME=/tmp/device-a DEEZ_STORAGE=sqlite DEEZ_DB=/tmp/device-a/deez.db DEEZ_CLOUD_URL=http://127.0.0.1:18080'
+          B='HOME=/tmp/device-b DEEZ_STORAGE=sqlite DEEZ_DB=/tmp/device-b/deez.db DEEZ_CLOUD_URL=http://127.0.0.1:18080'
+
+          printf '\n3\n' | env $B ./zig-out/bin/deez study 1 >/tmp/b-study.txt
+          env $B ./zig-out/bin/deez sync | tee /tmp/b-review-sync.txt
+          grep -q '↑ 0 decks, 0 notes, 1 reviews' /tmp/b-review-sync.txt
+          env $A ./zig-out/bin/deez sync | tee /tmp/a-review-sync.txt
+          grep -q '↓ 0 decks, 0 notes, 1 reviews' /tmp/a-review-sync.txt
+
+          env $A ./zig-out/bin/deez inspect 1 --json | jq '.reviews' >/tmp/a-reviews.json
+          env $B ./zig-out/bin/deez inspect 1 --json | jq '.reviews' >/tmp/b-reviews.json
+          diff -u /tmp/a-reviews.json /tmp/b-reviews.json
+
+          env $A ./zig-out/bin/deez sync | tee /tmp/a-idempotent.txt
+          grep -q '↑ 0 decks, 0 notes, 0 reviews' /tmp/a-idempotent.txt
+          grep -q '↓ 0 decks, 0 notes, 0 reviews' /tmp/a-idempotent.txt
+      - name: Prove clean deletion propagation and delete-vs-edit protection
+        shell: bash
+        run: |
+          set -euo pipefail
+          A='HOME=/tmp/device-a DEEZ_STORAGE=sqlite DEEZ_DB=/tmp/device-a/deez.db DEEZ_CLOUD_URL=http://127.0.0.1:18080'
+          B='HOME=/tmp/device-b DEEZ_STORAGE=sqlite DEEZ_DB=/tmp/device-b/deez.db DEEZ_CLOUD_URL=http://127.0.0.1:18080'
+
+          # Drive note deletion through the same local JSON API used by the web
+          # client. This exercises lifecycle-safe note retirement against A's
+          # SQLite database without adding a test-only terminal command.
+          env $A CI=1 ./zig-out/bin/deez web --port 19001 --no-open >/tmp/a-web.log 2>&1 &
+          a_web=$!
+          for _ in $(seq 1 40); do curl -fsS http://127.0.0.1:19001/api/v1/health >/dev/null 2>&1 && break; sleep 0.25; done
+          a_note="$(curl -fsS http://127.0.0.1:19001/api/v1/decks/1/notes | jq -r '.[0].id')"
+          curl -fsS -X DELETE "http://127.0.0.1:19001/api/v1/notes/$a_note" >/dev/null
+          kill "$a_web"; wait "$a_web" 2>/dev/null || true
+
+          env $A ./zig-out/bin/deez sync >/tmp/a-delete-note.txt
+          grep -q 'cloud 0 decks/1 notes' /tmp/a-delete-note.txt
+          env $B ./zig-out/bin/deez sync >/tmp/b-delete-note.txt
+          grep -q 'local 0 decks/1 notes' /tmp/b-delete-note.txt
+
+          # Recreate content, converge, then delete on A while B edits locally.
+          # B must refuse to destroy its surviving edit after A's deletion lands.
+          env $A ./zig-out/bin/deez note add 1 basic 'conflict front' 'conflict back'
+          env $A ./zig-out/bin/deez sync >/dev/null
+          env $B ./zig-out/bin/deez sync >/dev/null
+
+          env $A CI=1 ./zig-out/bin/deez web --port 19001 --no-open >/tmp/a-web.log 2>&1 &
+          a_web=$!
+          env $B CI=1 ./zig-out/bin/deez web --port 19002 --no-open >/tmp/b-web.log 2>&1 &
+          b_web=$!
+          for _ in $(seq 1 40); do
+            curl -fsS http://127.0.0.1:19001/api/v1/health >/dev/null 2>&1 && curl -fsS http://127.0.0.1:19002/api/v1/health >/dev/null 2>&1 && break
+            sleep 0.25
+          done
+          a_note="$(curl -fsS http://127.0.0.1:19001/api/v1/decks/1/notes | jq -r '.[0].id')"
+          b_note="$(curl -fsS http://127.0.0.1:19002/api/v1/decks/1/notes | jq -r '.[0].id')"
+          curl -fsS -X DELETE "http://127.0.0.1:19001/api/v1/notes/$a_note" >/dev/null
+          curl -fsS -X PATCH "http://127.0.0.1:19002/api/v1/notes/$b_note" \
+            -H 'content-type: application/json' \
+            --data '{"note_type":"basic","fields":["edited elsewhere","keep me"],"tags":[]}' >/dev/null
+          kill "$a_web" "$b_web"; wait "$a_web" 2>/dev/null || true; wait "$b_web" 2>/dev/null || true
+
+          env $A ./zig-out/bin/deez sync >/dev/null
+          set +e
+          env $B ./zig-out/bin/deez sync >/tmp/b-delete-conflict.out 2>/tmp/b-delete-conflict.err
+          status=$?
+          set -e
+          test "$status" -eq 2
+          grep -q 'SyncDeletionConflict' /tmp/b-delete-conflict.err
+          env $B ./zig-out/bin/deez deck export 1 | grep -q 'edited elsewhere'
+      - name: Cleanup
+        if: always()
+        run: |
+          test ! -f /tmp/deez-server.log || cat /tmp/deez-server.log
+          test ! -f /tmp/deez-relay.log || cat /tmp/deez-relay.log
+          test ! -f /tmp/deez-server.pid || kill "$(cat /tmp/deez-server.pid)" 2>/dev/null || true
+          test ! -f /tmp/deez-relay.pid || kill "$(cat /tmp/deez-relay.pid)" 2>/dev/null || true
+          pkill -f 'deez web --port 1900' 2>/dev/null || true
+          docker rm -f deez-sync-mongo >/dev/null 2>&1 || true
