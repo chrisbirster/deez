@@ -53,29 +53,24 @@ jobs:
     if: needs.prepare.outputs.should_release == 'true'
     runs-on: ubuntu-latest
     steps:
-      - name: Check out pinned Deez Web
-        uses: actions/checkout@v4
-        with:
-          repository: chrisbirster/deez-web
-          ref: 9669f3fe6241138d1e13cbd6368e9cfa0d2ebef4
-          path: deez-web
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - name: Install Deez Web dependencies
-        working-directory: deez-web
-        run: npm install --no-audit --no-fund
-      - name: Validate and build Deez Web
-        working-directory: deez-web
+      - uses: actions/checkout@v4
+      - name: Restore pinned compiled Deez Web bundle
+        shell: bash
         run: |
-          npm run typecheck
-          npm run build
-          test -f dist/index.html
-          test -d dist/assets
+          set -euo pipefail
+          cat release/deez-web-dist/part-*.b64 | base64 --decode > /tmp/deez-web-dist.zip
+          test "$(stat -c '%s' /tmp/deez-web-dist.zip)" = "54131"
+          echo '148ecaca204ffc0633447c6fba5c01f896b863a2f1cd0a19af15d8bbc47a75ea  /tmp/deez-web-dist.zip' | sha256sum --check
+          unzip -t /tmp/deez-web-dist.zip
+          mkdir -p dist/web
+          unzip -q /tmp/deez-web-dist.zip -d dist/web
+          test -f dist/web/index.html
+          test -d dist/web/assets
+          grep -q '<title>Deez</title>' dist/web/index.html
       - uses: actions/upload-artifact@v4
         with:
           name: deez-web-dist
-          path: deez-web/dist
+          path: dist/web
           if-no-files-found: error
 
   build-macos:
