@@ -36,7 +36,8 @@ Do not publish `v0.2.0-rc.4.2` until every required item below is satisfied on t
 - [ ] `deez web` local browser serving and media delivery smoke tests pass.
 - [ ] `deez serve` local API remains loopback-first and its API smoke coverage passes.
 - [ ] Hosted auth/session/ownership tests pass without changing the account-free local mode.
-- [ ] The packaged macOS archives contain the Deez binary and pinned Deez Web assets.
+- [ ] The packaged macOS archives contain the Deez binary and the pinned compiled Deez Web bundle.
+- [ ] The vendored Deez Web bundle reconstructs to SHA-256 `148ecaca204ffc0633447c6fba5c01f896b863a2f1cd0a19af15d8bbc47a75ea` and matches the recorded private CI artifact provenance in `release/deez-web-dist/manifest.txt`.
 
 ## Data safety
 
@@ -73,7 +74,7 @@ Do not publish `v0.2.0-rc.4.2` until every required item below is satisfied on t
 
 ## Exact-SHA GitHub release matrix
 
-The release candidate SHA must have successful runs for all three push workflows:
+The release candidate SHA must have successful runs for all four push workflows:
 
 - [ ] `ci`
   - formatting
@@ -92,6 +93,10 @@ The release candidate SHA must have successful runs for all three push workflows
   - backup/restore
   - rich-media `.sack`
   - Mongo benchmark warm-up plus five measured runs
+- [ ] `Release web bundle`
+  - reconstruct the vendored compiled Deez Web artifact
+  - verify exact byte size and SHA-256
+  - verify the ZIP and required `index.html` / `assets` contents
 
 Do not promote a branch merely because an earlier PR head was green. Re-run/verify these workflows after the release changes have landed on `dev`, and use that exact successful `dev` commit as the commit promoted to `main`.
 
@@ -107,7 +112,7 @@ zig build benchmark -Doptimize=ReleaseFast
 zig build mongo-integration-test
 ```
 
-The Mongo integration command requires the documented Mongo fixtures/CI environment.
+The Mongo integration command requires the documented Mongo fixtures/CI environment. The release web-bundle gate additionally reconstructs and checksum-verifies the vendored compiled artifact.
 
 ## Publication and Homebrew consumption
 
