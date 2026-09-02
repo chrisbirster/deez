@@ -65,6 +65,7 @@ jobs:
 
           DEEZ_STORAGE=mongodb \
           DEEZ_MONGO_URI='mongodb://127.0.0.1:27017/deez_sync?replicaSet=rs0' \
+          DEEZ_ALLOW_INSECURE_HOSTED_LOCALHOST='1' \
           DEEZ_AUTH_BASE_URL='http://127.0.0.1:18080' \
           DEEZ_EMAIL_ENDPOINT='http://127.0.0.1:18081/send' \
           DEEZ_EMAIL_RELAY_TOKEN='ci-token' \
