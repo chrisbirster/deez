@@ -301,7 +301,7 @@ fn httpRequest(
     var request = try client.request(method, uri, .{ .extra_headers = headers[0..count] });
     defer request.deinit();
     if (body) |bytes| {
-        try request.sendBodyComplete(bytes);
+        try request.sendBodyComplete(@constCast(bytes));
     } else {
         try request.sendBodiless();
     }
