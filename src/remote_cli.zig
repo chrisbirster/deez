@@ -317,7 +317,7 @@ fn httpRequest(
 }
 
 fn apiUrl(allocator: Allocator, base_url: []const u8, path: []const u8) ![]u8 {
-    return std.fmt.allocPrint(allocator, "{s}/api/v1{s}", .{ std.mem.trimRight(u8, base_url, "/"), path });
+    return std.fmt.allocPrint(allocator, "{s}/api/v1{s}", .{ std.mem.trimEnd(u8, base_url, "/"), path });
 }
 
 fn requireSuccess(response: RawResponse) !void {
