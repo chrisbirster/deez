@@ -18,6 +18,7 @@ pub const author_cli = @import("author_cli.zig");
 pub const edit_cli = @import("edit_cli.zig");
 pub const stats_cli = @import("stats_cli.zig");
 pub const remote_cli = @import("remote_cli.zig");
+pub const sync_guard = @import("sync_guard.zig");
 pub const review = @import("review.zig");
 pub const fsrs = @import("fsrs/root.zig");
 pub const storage = @import("storage/root.zig");
