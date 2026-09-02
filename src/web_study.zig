@@ -6,6 +6,7 @@ const storage = @import("storage/root.zig");
 const study_mod = @import("study.zig");
 
 const Io = std.Io;
+const max_review_clock_skew_ms: i64 = 5 * 60 * 1000;
 
 const DueCardResponse = struct {
     id: []const u8,
@@ -40,6 +41,7 @@ const PreviewResponse = struct {
 const ReviewInput = struct {
     rating: u8,
     expected_review_count: usize,
+    reviewed_at_ms: ?i64 = null,
 };
 
 const SchedulerResponse = struct {
@@ -53,6 +55,7 @@ const ReviewResponse = struct {
     review_id: []const u8,
     card_id: []const u8,
     rating: u8,
+    reviewed_at_ms: i64,
     due_at_ms: i64,
     interval_days: f64,
     scheduler: SchedulerResponse,
@@ -105,6 +108,13 @@ fn ensureActiveCard(store: *storage.Store, allocator: std.mem.Allocator, card_id
     return !try store.isCardRetired(card_id);
 }
 
+fn parseReviewOrder(text: []const u8) !study_mod.ReviewOrder {
+    if (std.mem.eql(u8, text, "due")) return .due;
+    if (std.mem.eql(u8, text, "reviews-first")) return .reviews_first;
+    if (std.mem.eql(u8, text, "new-first")) return .new_first;
+    return error.InvalidReviewOrder;
+}
+
 pub fn next(
     store: *storage.Store,
     io: Io,
@@ -117,18 +127,49 @@ pub fn next(
         return;
     }
 
-    const due = try study_mod.Study.init(store).dueCards(res.arena, deck_id, nowMs(io), 1);
-    if (due.len == 0) {
+    const query = try req.query();
+    var options: study_mod.SessionOptions = .{};
+    var new_seen: usize = 0;
+    if (query.get("new_limit")) |text| {
+        options.new_limit = std.fmt.parseInt(usize, text, 10) catch {
+            try jsonError(res, 400, "invalid_new_limit", "new_limit must be a non-negative integer");
+            return;
+        };
+    }
+    if (query.get("new_seen")) |text| {
+        new_seen = std.fmt.parseInt(usize, text, 10) catch {
+            try jsonError(res, 400, "invalid_new_seen", "new_seen must be a non-negative integer");
+            return;
+        };
+    }
+    if (query.get("order")) |text| {
+        options.review_order = parseReviewOrder(text) catch {
+            try jsonError(res, 400, "invalid_review_order", "order must be due, reviews-first, or new-first");
+            return;
+        };
+    }
+    if (query.get("shuffle_seed")) |text| {
+        options.shuffle_seed = std.fmt.parseInt(u64, text, 10) catch {
+            try jsonError(res, 400, "invalid_shuffle_seed", "shuffle_seed must be an unsigned integer");
+            return;
+        };
+    }
+
+    var session = study_mod.Session.init(study_mod.Study.init(store), deck_id, options);
+    session.new_seen = new_seen;
+    const selected = try session.next(res.arena, nowMs(io));
+    if (selected == null) {
         try res.json(NextResponse{ .card = null }, .{});
         return;
     }
 
-    const selected = due[0];
+    const card = selected.?;
+    defer card.deinit(res.arena);
     try res.json(NextResponse{
         .card = .{
-            .id = try idText(res.arena, selected.id),
-            .deck_id = try idText(res.arena, selected.deck_id),
-            .due_at_ms = selected.due_at_ms,
+            .id = try idText(res.arena, card.id),
+            .deck_id = try idText(res.arena, card.deck_id),
+            .due_at_ms = card.due_at_ms,
         },
     }, .{});
 }
@@ -190,12 +231,22 @@ pub fn review(
         return;
     }
 
-    const reviewed_at_ms = nowMs(io);
+    const server_now_ms = nowMs(io);
+    const reviewed_at_ms = input.reviewed_at_ms orelse server_now_ms;
+    if (reviewed_at_ms > server_now_ms + max_review_clock_skew_ms) {
+        try jsonError(res, 400, "invalid_review_time", "reviewed_at_ms cannot be in the future");
+        return;
+    }
+
     if (try store.getSchedulerState(card_id)) |state| {
         if (state.due_at_ms > reviewed_at_ms) {
             try jsonError(res, 409, "card_not_due", "Card is not due for review yet");
             return;
         }
+    }
+    if (history.len != 0 and reviewed_at_ms <= history[history.len - 1].reviewed_at_ms) {
+        try jsonError(res, 409, "stale_review", "Review time must be later than the existing review history");
+        return;
     }
 
     const result = try study_mod.Study.init(store).recordReview(
@@ -210,6 +261,7 @@ pub fn review(
         .review_id = try idText(res.arena, result.review_id),
         .card_id = try idText(res.arena, card_id),
         .rating = rating.value(),
+        .reviewed_at_ms = reviewed_at_ms,
         .due_at_ms = result.candidate.due_at_ms,
         .interval_days = result.candidate.interval_days,
         .scheduler = .{
@@ -231,4 +283,11 @@ test "study candidate response preserves the FSRS rating and interval" {
     try std.testing.expectEqual(@as(u8, 3), response.rating);
     try std.testing.expectEqual(@as(i64, 1234), response.due_at_ms);
     try std.testing.expectApproxEqAbs(@as(f64, 2.5), response.interval_days, 1e-12);
+}
+
+test "study review-order parser accepts the CLI spellings" {
+    try std.testing.expectEqual(study_mod.ReviewOrder.due, try parseReviewOrder("due"));
+    try std.testing.expectEqual(study_mod.ReviewOrder.reviews_first, try parseReviewOrder("reviews-first"));
+    try std.testing.expectEqual(study_mod.ReviewOrder.new_first, try parseReviewOrder("new-first"));
+    try std.testing.expectError(error.InvalidReviewOrder, parseReviewOrder("random"));
 }

@@ -62,6 +62,11 @@ const SchedulerResponse = struct {
     last_reviewed_at_ms: ?i64,
 };
 
+const ReviewHistoryResponse = struct {
+    rating: u8,
+    reviewed_at_ms: i64,
+};
+
 const CardResponse = struct {
     id: []const u8,
     deck_id: []const u8,
@@ -71,6 +76,7 @@ const CardResponse = struct {
     rendered: RenderedResponse,
     scheduler: ?SchedulerResponse = null,
     review_count: usize,
+    reviews: []const ReviewHistoryResponse,
 };
 
 fn idText(allocator: std.mem.Allocator, id: u64) ![]const u8 {
@@ -308,6 +314,13 @@ pub fn card(
         .last_reviewed_at_ms = state.last_reviewed_at_ms,
     } else null;
     const history = try store.loadHistory(res.arena, card_id);
+    const reviews = try res.arena.alloc(ReviewHistoryResponse, history.len);
+    for (history, 0..) |entry, index| {
+        reviews[index] = .{
+            .rating = entry.rating.value(),
+            .reviewed_at_ms = entry.reviewed_at_ms,
+        };
+    }
 
     try res.json(CardResponse{
         .id = try idText(res.arena, owned.id),
@@ -318,6 +331,7 @@ pub fn card(
         .rendered = rendered,
         .scheduler = scheduler,
         .review_count = history.len,
+        .reviews = reviews,
     }, .{ .emit_null_optional_fields = false });
 }
 
