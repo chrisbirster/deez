@@ -1,0 +1,27 @@
+name: Release web bundle
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify pinned compiled Deez Web bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat release/deez-web-dist/part-*.b64 | base64 --decode > /tmp/deez-web-dist.zip
+          test "$(stat -c '%s' /tmp/deez-web-dist.zip)" = "54131"
+          echo '148ecaca204ffc0633447c6fba5c01f896b863a2f1cd0a19af15d8bbc47a75ea  /tmp/deez-web-dist.zip' | sha256sum --check
+          unzip -t /tmp/deez-web-dist.zip
+          mkdir -p /tmp/deez-web-dist
+          unzip -q /tmp/deez-web-dist.zip -d /tmp/deez-web-dist
+          test -f /tmp/deez-web-dist/index.html
+          test -d /tmp/deez-web-dist/assets
+          grep -q '<title>Deez</title>' /tmp/deez-web-dist/index.html
