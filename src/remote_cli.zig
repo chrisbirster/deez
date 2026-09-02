@@ -1,6 +1,5 @@
 const std = @import("std");
 
-const card_types = @import("card_types.zig");
 const config = @import("config.zig");
 const content = @import("content.zig");
 const fsrs = @import("fsrs/root.zig");
@@ -15,14 +14,13 @@ const default_base_url = "https://deez.run";
 const cookie_name = "__Host-deez_session";
 
 pub const help_text =
-    \\Cloud account and sync:
-    \\  deez login <email>          Sign in to deez.run with a magic link
-    \\  deez whoami                 Show the signed-in cloud account
-    \\  deez sync                   Bidirectionally sync local Deez with deez.run
-    \\  deez logout                 Revoke this CLI cloud session
-    \\n    \\Environment:
-    \\  DEEZ_CLOUD_URL              Override https://deez.run (development/testing)
-    \\n;
+    "Cloud account and sync:\n" ++
+    "  deez login <email>          Sign in to deez.run with a magic link\n" ++
+    "  deez whoami                 Show the signed-in cloud account\n" ++
+    "  deez sync                   Bidirectionally sync local Deez with deez.run\n" ++
+    "  deez logout                 Revoke this CLI cloud session\n\n" ++
+    "Environment:\n" ++
+    "  DEEZ_CLOUD_URL              Override https://deez.run (development/testing)\n\n";
 
 const CloudConfig = struct {
     version: u32 = 1,
@@ -442,15 +440,15 @@ fn hashDeckName(name: []const u8) u64 {
 fn hashNoteParts(note_type: []const u8, fields: []const []const u8, tags: []const []const u8) u64 {
     var hash = std.hash.Wyhash.init(0);
     hash.update(note_type);
-    hash.update(&.{0});
+    hash.update(&[_]u8{0});
     for (fields) |field| {
         hash.update(field);
-        hash.update(&.{0});
+        hash.update(&[_]u8{0});
     }
-    hash.update(&.{0xff});
+    hash.update(&[_]u8{0xff});
     for (tags) |tag| {
         hash.update(tag);
-        hash.update(&.{0});
+        hash.update(&[_]u8{0});
     }
     return hash.final();
 }
@@ -723,7 +721,6 @@ fn syncMappedNotes(
     const local_notes = try content_store.notesForDeck(allocator, deck_map.local_id);
     const remote_summaries = try listRemoteNotes(init, cloud, deck_map.remote_id);
 
-    // First reconcile mapped notes.
     for (state.notes.items) |*mapping| {
         if (mapping.local_deck_id != deck_map.local_id or mapping.remote_deck_id != deck_map.remote_id) continue;
         var local_found: ?content.OwnedNote = null;
@@ -769,7 +766,6 @@ fn syncMappedNotes(
         try syncReviewsForNote(init, store, cloud, mapping.*, counters);
     }
 
-    // Pair identical unmapped notes before creating anything.
     for (local_notes) |entry| {
         if (findNoteLocal(state, entry.note.id) != null) continue;
         const local_hash = try localNoteHash(allocator, entry.note);
@@ -796,7 +792,6 @@ fn syncMappedNotes(
         }
     }
 
-    // Push remaining local notes.
     for (local_notes) |entry| {
         if (findNoteLocal(state, entry.note.id) != null) continue;
         const remote = try createRemoteNote(init, cloud, deck_map.remote_id, entry.note);
@@ -813,7 +808,6 @@ fn syncMappedNotes(
         try syncReviewsForNote(init, store, cloud, state.notes.items[state.notes.items.len - 1], counters);
     }
 
-    // Pull remaining remote notes.
     for (remote_summaries) |summary| {
         const remote_id = parseRemoteId(summary.id) catch continue;
         if (findNoteRemote(state, remote_id) != null) continue;
@@ -850,14 +844,13 @@ fn syncWithStore(
     const allocator = init.arena.allocator();
     var state = try loadSyncState(init);
     var counters: SyncCounters = .{};
-    const remote_decks = try listRemoteDecks(init, cloud);
+    const initial_remote_decks = try listRemoteDecks(init, cloud);
     const local_decks = try store.decks(allocator, nowMs(init.io));
 
-    // Pair exact-name decks on first contact.
     for (local_decks) |local| {
         if (findDeckLocal(&state, local.id) != null) continue;
         const local_hash = hashDeckName(local.name);
-        for (remote_decks) |remote| {
+        for (initial_remote_decks) |remote| {
             const remote_id = parseRemoteId(remote.id) catch continue;
             if (findDeckRemote(&state, remote_id) != null) continue;
             if (hashDeckName(remote.name) != local_hash) continue;
@@ -866,7 +859,6 @@ fn syncWithStore(
         }
     }
 
-    // Push remaining local decks.
     for (local_decks) |local| {
         if (findDeckLocal(&state, local.id) != null) continue;
         const remote = try createRemoteDeck(init, cloud, local.name);
@@ -879,8 +871,7 @@ fn syncWithStore(
         counters.pushed_decks += 1;
     }
 
-    // Pull remaining remote decks.
-    for (remote_decks) |remote| {
+    for (initial_remote_decks) |remote| {
         const remote_id = parseRemoteId(remote.id) catch continue;
         if (findDeckRemote(&state, remote_id) != null) continue;
         const local_id = try store.createDeck(remote.name, nowMs(init.io));
@@ -893,7 +884,7 @@ fn syncWithStore(
         counters.pulled_decks += 1;
     }
 
-    // Reconcile names, notes, cards and immutable reviews for every mapped deck.
+    const remote_decks = try listRemoteDecks(init, cloud);
     for (state.decks.items) |*mapping| {
         const local = (try store.getDeck(allocator, mapping.local_id)) orelse continue;
         var remote_match: ?RemoteDeck = null;
@@ -989,7 +980,6 @@ pub fn run(init: std.process.Init, args: []const []const u8) !void {
     }
     return error.InvalidArguments;
 }
-
 
 test "magic-link parser accepts raw tokens and full URLs" {
     const raw = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
