@@ -150,20 +150,43 @@ jobs:
           A='HOME=/tmp/device-a DEEZ_STORAGE=sqlite DEEZ_DB=/tmp/device-a/deez.db DEEZ_CLOUD_URL=http://127.0.0.1:18080'
           B='HOME=/tmp/device-b DEEZ_STORAGE=sqlite DEEZ_DB=/tmp/device-b/deez.db DEEZ_CLOUD_URL=http://127.0.0.1:18080'
 
-          # A clean note deletion propagates to the cloud and then B.
-          env $A ./zig-out/bin/deez note delete 1 1 --yes
+          # Drive note deletion through the same local JSON API used by the web
+          # client. This exercises lifecycle-safe note retirement against A's
+          # SQLite database without adding a test-only terminal command.
+          env $A CI=1 ./zig-out/bin/deez web --port 19001 --no-open >/tmp/a-web.log 2>&1 &
+          a_web=$!
+          for _ in $(seq 1 40); do curl -fsS http://127.0.0.1:19001/api/v1/health >/dev/null 2>&1 && break; sleep 0.25; done
+          a_note="$(curl -fsS http://127.0.0.1:19001/api/v1/decks/1/notes | jq -r '.[0].id')"
+          curl -fsS -X DELETE "http://127.0.0.1:19001/api/v1/notes/$a_note" >/dev/null
+          kill "$a_web"; wait "$a_web" 2>/dev/null || true
+
           env $A ./zig-out/bin/deez sync >/tmp/a-delete-note.txt
           grep -q 'cloud 0 decks/1 notes' /tmp/a-delete-note.txt
           env $B ./zig-out/bin/deez sync >/tmp/b-delete-note.txt
           grep -q 'local 0 decks/1 notes' /tmp/b-delete-note.txt
 
-          # Recreate content, converge, then delete on A while B edits. A's
-          # deletion must not destroy B's surviving edit when B later syncs.
+          # Recreate content, converge, then delete on A while B edits locally.
+          # B must refuse to destroy its surviving edit after A's deletion lands.
           env $A ./zig-out/bin/deez note add 1 basic 'conflict front' 'conflict back'
           env $A ./zig-out/bin/deez sync >/dev/null
           env $B ./zig-out/bin/deez sync >/dev/null
-          env $A ./zig-out/bin/deez note delete 1 2 --yes
-          env $B ./zig-out/bin/deez note edit 1 2 'edited elsewhere' 'keep me'
+
+          env $A CI=1 ./zig-out/bin/deez web --port 19001 --no-open >/tmp/a-web.log 2>&1 &
+          a_web=$!
+          env $B CI=1 ./zig-out/bin/deez web --port 19002 --no-open >/tmp/b-web.log 2>&1 &
+          b_web=$!
+          for _ in $(seq 1 40); do
+            curl -fsS http://127.0.0.1:19001/api/v1/health >/dev/null 2>&1 && curl -fsS http://127.0.0.1:19002/api/v1/health >/dev/null 2>&1 && break
+            sleep 0.25
+          done
+          a_note="$(curl -fsS http://127.0.0.1:19001/api/v1/decks/1/notes | jq -r '.[0].id')"
+          b_note="$(curl -fsS http://127.0.0.1:19002/api/v1/decks/1/notes | jq -r '.[0].id')"
+          curl -fsS -X DELETE "http://127.0.0.1:19001/api/v1/notes/$a_note" >/dev/null
+          curl -fsS -X PATCH "http://127.0.0.1:19002/api/v1/notes/$b_note" \
+            -H 'content-type: application/json' \
+            --data '{"note_type":"basic","fields":["edited elsewhere","keep me"],"tags":[]}' >/dev/null
+          kill "$a_web" "$b_web"; wait "$a_web" 2>/dev/null || true; wait "$b_web" 2>/dev/null || true
+
           env $A ./zig-out/bin/deez sync >/dev/null
           set +e
           env $B ./zig-out/bin/deez sync >/tmp/b-delete-conflict.out 2>/tmp/b-delete-conflict.err
@@ -179,4 +202,5 @@ jobs:
           test ! -f /tmp/deez-relay.log || cat /tmp/deez-relay.log
           test ! -f /tmp/deez-server.pid || kill "$(cat /tmp/deez-server.pid)" 2>/dev/null || true
           test ! -f /tmp/deez-relay.pid || kill "$(cat /tmp/deez-relay.pid)" 2>/dev/null || true
+          pkill -f 'deez web --port 1900' 2>/dev/null || true
           docker rm -f deez-sync-mongo >/dev/null 2>&1 || true
