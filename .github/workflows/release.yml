@@ -252,3 +252,10 @@ jobs:
           fi
           git commit -m "Update Homebrew formula for ${TAG}"
           git push origin main
+
+  homebrew-consumption:
+    needs:
+      - prepare
+      - publish
+    if: needs.prepare.outputs.should_release == 'true'
+    uses: ./.github/workflows/homebrew-smoke.yml
