@@ -6,6 +6,9 @@ on:
       - main
     paths:
       - Formula/deez.rb
+      - .github/workflows/homebrew-smoke.yml
+  workflow_call:
+  workflow_dispatch:
 
 jobs:
   install-and-study:
