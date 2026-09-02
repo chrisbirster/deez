@@ -6,6 +6,7 @@ const storage = @import("storage/root.zig");
 const study_mod = @import("study.zig");
 
 const Io = std.Io;
+const max_review_clock_skew_ms: i64 = 5 * 60 * 1000;
 
 const DueCardResponse = struct {
     id: []const u8,
@@ -40,6 +41,7 @@ const PreviewResponse = struct {
 const ReviewInput = struct {
     rating: u8,
     expected_review_count: usize,
+    reviewed_at_ms: ?i64 = null,
 };
 
 const SchedulerResponse = struct {
@@ -53,6 +55,7 @@ const ReviewResponse = struct {
     review_id: []const u8,
     card_id: []const u8,
     rating: u8,
+    reviewed_at_ms: i64,
     due_at_ms: i64,
     interval_days: f64,
     scheduler: SchedulerResponse,
@@ -190,7 +193,17 @@ pub fn review(
         return;
     }
 
-    const reviewed_at_ms = nowMs(io);
+    const server_now_ms = nowMs(io);
+    const reviewed_at_ms = input.reviewed_at_ms orelse server_now_ms;
+    if (reviewed_at_ms > server_now_ms + max_review_clock_skew_ms) {
+        try jsonError(res, 400, "invalid_review_time", "reviewed_at_ms cannot be in the future");
+        return;
+    }
+    if (history.len != 0 and reviewed_at_ms <= history[history.len - 1].reviewed_at_ms) {
+        try jsonError(res, 409, "stale_review", "Review time must be later than the existing review history");
+        return;
+    }
+
     if (try store.getSchedulerState(card_id)) |state| {
         if (state.due_at_ms > reviewed_at_ms) {
             try jsonError(res, 409, "card_not_due", "Card is not due for review yet");
@@ -210,6 +223,7 @@ pub fn review(
         .review_id = try idText(res.arena, result.review_id),
         .card_id = try idText(res.arena, card_id),
         .rating = rating.value(),
+        .reviewed_at_ms = reviewed_at_ms,
         .due_at_ms = result.candidate.due_at_ms,
         .interval_days = result.candidate.interval_days,
         .scheduler = .{
