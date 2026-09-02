@@ -1,8 +1,12 @@
 name: Two-device sync convergence
 
 on:
+  push:
+    branches: [dev, main]
   pull_request:
     paths:
+      - 'VERSION'
+      - 'docs/release-checklist.md'
       - 'src/remote_cli.zig'
       - 'src/sync_guard.zig'
       - 'src/hosted_*.zig'
@@ -151,9 +155,6 @@ jobs:
           A='HOME=/tmp/device-a DEEZ_STORAGE=sqlite DEEZ_DB=/tmp/device-a/deez.db DEEZ_CLOUD_URL=http://127.0.0.1:18080'
           B='HOME=/tmp/device-b DEEZ_STORAGE=sqlite DEEZ_DB=/tmp/device-b/deez.db DEEZ_CLOUD_URL=http://127.0.0.1:18080'
 
-          # Drive note deletion through the same local JSON API used by the web
-          # client. This exercises lifecycle-safe note retirement against A's
-          # SQLite database without adding a test-only terminal command.
           env $A CI=1 ./zig-out/bin/deez web --port 19001 --no-open >/tmp/a-web.log 2>&1 &
           a_web=$!
           for _ in $(seq 1 40); do curl -fsS http://127.0.0.1:19001/api/v1/health >/dev/null 2>&1 && break; sleep 0.25; done
@@ -166,8 +167,6 @@ jobs:
           env $B ./zig-out/bin/deez sync >/tmp/b-delete-note.txt
           grep -q 'local 0 decks/1 notes' /tmp/b-delete-note.txt
 
-          # Recreate content, converge, then delete on A while B edits locally.
-          # B must refuse to destroy its surviving edit after A's deletion lands.
           env $A ./zig-out/bin/deez note add 1 basic 'conflict front' 'conflict back'
           env $A ./zig-out/bin/deez sync >/dev/null
           env $B ./zig-out/bin/deez sync >/dev/null
