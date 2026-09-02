@@ -68,6 +68,44 @@ fn isLegacyOptionalReverseAuthoring(args: []const []const u8) bool {
         std.mem.eql(u8, args[4], "optional-reverse");
 }
 
+fn runGuardedSync(init: std.process.Init, args: []const []const u8) !void {
+    if (args.len != 2) printRawErrorAndExit(init, error.InvalidArguments, deez.remote_cli.help_text);
+    const deletions = deez.sync_guard.prepare(init) catch |err| switch (err) {
+        error.NotLoggedIn,
+        error.SyncAccountMismatch,
+        error.SyncDeletionConflict,
+        error.InvalidSyncState,
+        => printRawErrorAndExit(init, err, deez.remote_cli.help_text),
+        else => return err,
+    };
+
+    deez.remote_cli.run(init, args) catch |err| switch (err) {
+        error.InvalidArguments,
+        error.InvalidMagicLink,
+        error.NotLoggedIn,
+        error.MissingCloudSession,
+        => printRawErrorAndExit(init, err, deez.remote_cli.help_text),
+        else => return err,
+    };
+    try deez.sync_guard.seal(init);
+
+    if (deletions.total() != 0) {
+        var stdout_buffer: [4096]u8 = undefined;
+        var stdout_file_writer: Io.File.Writer = .init(.stdout(), init.io, &stdout_buffer);
+        const out = &stdout_file_writer.interface;
+        defer out.flush() catch {};
+        try out.print(
+            "Deleted during sync: local {d} decks/{d} notes, cloud {d} decks/{d} notes.\n",
+            .{
+                deletions.deleted_local_decks,
+                deletions.deleted_local_notes,
+                deletions.deleted_remote_decks,
+                deletions.deleted_remote_notes,
+            },
+        );
+    }
+}
+
 pub fn main(init: std.process.Init) !void {
     const arena = init.arena.allocator();
     const raw_args = try init.minimal.args.toSlice(arena);
@@ -88,6 +126,10 @@ pub fn main(init: std.process.Init) !void {
             }
         };
         return;
+    }
+
+    if (deez.sync_guard.isSyncCommand(args)) {
+        return runGuardedSync(init, args);
     }
 
     if (deez.remote_cli.isCommand(args)) {
@@ -165,7 +207,7 @@ pub fn main(init: std.process.Init) !void {
                     error.InvalidArguments, error.InvalidId => printErrorAndExit(init, err, .notes),
                     else => return err,
                 }
-            };
+            }
         },
         .rich_cli => {
             deez.rich_cli.run(init, args) catch |err| {
@@ -173,7 +215,7 @@ pub fn main(init: std.process.Init) !void {
                     error.InvalidArguments, error.InvalidId, error.UnknownCommand => printErrorAndExit(init, err, .rich),
                     else => return err,
                 }
-            };
+            }
         },
     }
 }
