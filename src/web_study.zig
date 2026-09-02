@@ -237,16 +237,16 @@ pub fn review(
         try jsonError(res, 400, "invalid_review_time", "reviewed_at_ms cannot be in the future");
         return;
     }
-    if (history.len != 0 and reviewed_at_ms <= history[history.len - 1].reviewed_at_ms) {
-        try jsonError(res, 409, "stale_review", "Review time must be later than the existing review history");
-        return;
-    }
 
     if (try store.getSchedulerState(card_id)) |state| {
         if (state.due_at_ms > reviewed_at_ms) {
             try jsonError(res, 409, "card_not_due", "Card is not due for review yet");
             return;
         }
+    }
+    if (history.len != 0 and reviewed_at_ms <= history[history.len - 1].reviewed_at_ms) {
+        try jsonError(res, 409, "stale_review", "Review time must be later than the existing review history");
+        return;
     }
 
     const result = try study_mod.Study.init(store).recordReview(
