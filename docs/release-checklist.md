@@ -1,6 +1,6 @@
-# Deez v0.2.0-rc.5 release gate
+# Deez v0.2.0-rc.6 release gate
 
-Do not publish `v0.2.0-rc.5` until every required item below is satisfied on the exact release commit.
+Do not publish `v0.2.0-rc.6` until every required item below is satisfied on the exact release commit.
 
 ## Scheduler correctness
 
@@ -62,9 +62,9 @@ Do not publish `v0.2.0-rc.5` until every required item below is satisfied on the
 
 ## deez.run airplane-mode acceptance
 
-Before calling rc.5 plane-ready, the corresponding `deez-run` production build must:
+Before calling rc.6 plane-ready, the corresponding `deez-run` production build must:
 
-- [ ] pin an immutable Deez core commit containing the rc.5 functionality.
+- [ ] pin an immutable Deez core commit containing the rc.6 functionality.
 - [ ] package `/app/web/deez-scheduler.wasm` in the production image.
 - [ ] instantiate the compiled WASM artifact and execute initial + subsequent offline scheduling in CI.
 - [ ] precache `/deez-scheduler.wasm` with the PWA application shell.
@@ -95,13 +95,15 @@ Before calling rc.5 plane-ready, the corresponding `deez-run` production build m
 - [ ] MongoDB environment examples work.
 - [ ] First deck/note/study workflow works with SQLite.
 - [ ] `deez login`, `deez whoami`, `deez sync`, and `deez logout` help/output match supported behavior.
+- [ ] `deez --version` and `deez -V` report the exact `VERSION` value.
+- [ ] Production-style CLI magic-link login persists the issued cloud session and `deez whoami` succeeds with it.
 - [ ] `deez fsrs optimize --recency` matches current positional recency behavior.
 - [ ] Stats/inspect human and JSON output work.
 - [ ] Backup/recovery/migration docs are discoverable.
 
 ## Exact-SHA GitHub release matrix
 
-The release candidate SHA must have successful runs for all five required workflows:
+The release candidate SHA must have successful runs for all six required workflows:
 
 - [ ] `ci`
   - formatting
@@ -131,6 +133,11 @@ The release candidate SHA must have successful runs for all five required workfl
   - content/review convergence
   - deletion propagation and delete-vs-edit protection
   - second-sync zero-mutation invariant
+- [ ] `CLI cloud auth`
+  - `deez --version` and `deez -V` match `VERSION`
+  - real CLI magic-link login through the hosted server and recording email relay
+  - issued session persists to `~/.config/deez/cloud.json`
+  - `deez whoami` succeeds with that persisted session
 
 Do not promote a branch merely because an earlier PR head was green. Re-run/verify these workflows after release preparation has landed on `dev`, and use that exact successful `dev` commit as the commit promoted to `main`.
 
@@ -145,24 +152,25 @@ zig build benchmark -Doptimize=ReleaseFast
 zig build mongo-integration-test
 ```
 
-The Mongo integration and two-device convergence gates require their documented CI fixtures. The release web-bundle gate additionally reconstructs and checksum-verifies the vendored compiled artifact.
+The Mongo integration and two-device convergence gates require their documented CI fixtures. The release web-bundle and CLI cloud-auth gates additionally verify their production-shaped artifacts and flows.
 
 ## Publication and Homebrew consumption
 
 After the exact green release SHA is fast-forwarded from `dev` to `main`:
 
-- [ ] `VERSION` is exactly `0.2.0-rc.5`.
-- [ ] The release workflow creates annotated tag `v0.2.0-rc.5` on that exact SHA.
+- [ ] `VERSION` is exactly `0.2.0-rc.6`.
+- [ ] The release workflow creates annotated tag `v0.2.0-rc.6` on that exact SHA.
 - [ ] Apple Silicon and Intel macOS archives are published with `SHA256SUMS`.
 - [ ] The Homebrew formula on `main` is updated to the published tag and checksums.
 - [ ] A clean macOS runner taps this repository and installs Deez through Homebrew.
 - [ ] The Homebrew-installed binary completes a real SQLite deck → note → study → process restart → study persistence smoke test.
+- [ ] The Homebrew-installed binary reports `deez 0.2.0-rc.6` from `deez --version`.
 
 ## Compatibility notes for release notes
 
 Release notes must state:
 
-- Deez version: v0.2.0-rc.5;
+- Deez version: v0.2.0-rc.6;
 - supported Zig version: 0.16.0 for source builds;
 - supported scheduler major(s): FSRS-7;
 - MongoDB driver: Bongo v0.6.0 at commit `1c7bdf9eb5b1c63236a432333a6b26d51d1a4ae5`;
@@ -170,6 +178,8 @@ Release notes must state:
 - SQLite remains the default local backend while MongoDB is the production hosted validation backend;
 - review history is immutable source of truth;
 - cloud sync state is account scoped and deletion conflicts fail closed;
+- CLI magic-link login persists the issued session cookie without depending on optional consume-response JSON parsing;
+- `deez --version` and `deez -V` report the build version sourced from `VERSION`;
 - `deez.run` local-first offline study uses the shared Zig/FSRS WebAssembly scheduler rather than a separate JavaScript scheduler implementation;
 - existing deck scheduler major is pinned and never silently migrated;
 - FSRS-8 is not claimed until a published implementation passes the full engine definition of done.
@@ -181,5 +191,5 @@ Only after this checklist is satisfied:
 1. land release preparation on `dev`;
 2. verify the full GitHub release matrix on the exact resulting `dev` SHA;
 3. fast-forward `main` to that exact SHA;
-4. allow `.github/workflows/release.yml` to create tag `v0.2.0-rc.5`, publish macOS archives/checksums, and update the Homebrew formula;
+4. allow `.github/workflows/release.yml` to create tag `v0.2.0-rc.6`, publish macOS archives/checksums, and update the Homebrew formula;
 5. require the Homebrew consumption smoke to pass before calling the release complete.
