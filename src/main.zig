@@ -238,7 +238,7 @@ pub fn main(init: std.process.Init) !void {
                     error.InvalidArguments, error.InvalidId => printErrorAndExit(init, err, .notes),
                     else => return err,
                 }
-            }
+            };
         },
         .rich_cli => {
             deez.rich_cli.run(init, args) catch |err| {
@@ -246,7 +246,7 @@ pub fn main(init: std.process.Init) !void {
                     error.InvalidArguments, error.InvalidId, error.UnknownCommand => printErrorAndExit(init, err, .rich),
                     else => return err,
                 }
-            }
+            };
         },
     }
 }
