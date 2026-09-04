@@ -1,5 +1,6 @@
 const std = @import("std");
 
+pub const version = @import("build_options").version;
 pub const time = @import("time.zig");
 pub const card = @import("card.zig");
 pub const deck = @import("deck.zig");
@@ -17,6 +18,7 @@ pub const rich_cli = @import("rich_cli.zig");
 pub const author_cli = @import("author_cli.zig");
 pub const edit_cli = @import("edit_cli.zig");
 pub const stats_cli = @import("stats_cli.zig");
+pub const remote_login = @import("remote_login.zig");
 pub const remote_cli = @import("remote_cli.zig");
 pub const sync_guard = @import("sync_guard.zig");
 pub const review = @import("review.zig");
