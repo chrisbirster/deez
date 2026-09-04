@@ -1,0 +1,129 @@
+name: CLI cloud auth
+
+on:
+  push:
+    branches: [dev, main]
+  pull_request:
+    paths:
+      - 'VERSION'
+      - 'src/main.zig'
+      - 'src/root.zig'
+      - 'src/remote_login.zig'
+      - 'src/remote_cli.zig'
+      - 'src/hosted_*.zig'
+      - '.github/workflows/cli-auth.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cli-auth:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+      - name: Install native dependencies
+        run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev jq
+      - name: Build and verify version output
+        shell: bash
+        run: |
+          set -euo pipefail
+          zig build -Doptimize=ReleaseSafe
+          expected="deez $(cat VERSION)"
+          test "$(./zig-out/bin/deez --version)" = "$expected"
+          test "$(./zig-out/bin/deez -V)" = "$expected"
+      - name: Start MongoDB replica set
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run -d --name deez-auth-mongo -p 27017:27017 mongo:8 --replSet rs0 --bind_ip_all
+          for _ in $(seq 1 60); do
+            if docker exec deez-auth-mongo mongosh --quiet --eval 'db.adminCommand({ping:1}).ok' 2>/dev/null | grep -q '^1$'; then break; fi
+            sleep 1
+          done
+          docker exec deez-auth-mongo mongosh --quiet --eval 'rs.initiate({_id:"rs0",members:[{_id:0,host:"127.0.0.1:27017"}]})'
+          for _ in $(seq 1 60); do
+            if docker exec deez-auth-mongo mongosh --quiet --eval 'db.hello().isWritablePrimary' 2>/dev/null | grep -q '^true$'; then break; fi
+            sleep 1
+          done
+      - name: Start recording email relay and hosted server
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/deez-relay.py <<'PY'
+          import json
+          from http.server import BaseHTTPRequestHandler, HTTPServer
+
+          class Handler(BaseHTTPRequestHandler):
+              def do_POST(self):
+                  n = int(self.headers.get('content-length', '0'))
+                  body = json.loads(self.rfile.read(n))
+                  with open('/tmp/deez-magic-link', 'w', encoding='utf-8') as f:
+                      f.write(body['magic_link'])
+                  self.send_response(202)
+                  self.end_headers()
+              def log_message(self, *args):
+                  pass
+
+          HTTPServer(('127.0.0.1', 18081), Handler).serve_forever()
+          PY
+          python3 /tmp/deez-relay.py >/tmp/deez-relay.log 2>&1 &
+          echo $! >/tmp/deez-relay.pid
+
+          DEEZ_STORAGE=mongodb \
+          DEEZ_MONGO_URI='mongodb://127.0.0.1:27017/deez_auth?replicaSet=rs0' \
+          DEEZ_ALLOW_INSECURE_HOSTED_LOCALHOST='1' \
+          DEEZ_AUTH_BASE_URL='http://127.0.0.1:18080' \
+          DEEZ_EMAIL_ENDPOINT='http://127.0.0.1:18081/send' \
+          DEEZ_EMAIL_RELAY_TOKEN='ci-token' \
+          ./zig-out/bin/deez serve --host 0.0.0.0 --port 18080 >/tmp/deez-server.log 2>&1 &
+          echo $! >/tmp/deez-server.pid
+
+          for _ in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:18080/api/v1/health >/dev/null 2>&1; then break; fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:18080/api/v1/health | grep -q '"status":"ok"'
+      - name: Login through the real CLI and verify persisted session
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/deez-auth-home
+          mkdir -p /tmp/deez-auth-home
+          rm -f /tmp/deez-magic-link
+
+          HOME=/tmp/deez-auth-home \
+          DEEZ_CLOUD_URL=http://127.0.0.1:18080 \
+          ./zig-out/bin/deez login sync-ci@example.com < <(
+            for _ in $(seq 1 60); do
+              if test -s /tmp/deez-magic-link; then break; fi
+              sleep 0.2
+            done
+            test -s /tmp/deez-magic-link
+            cat /tmp/deez-magic-link
+          ) | tee /tmp/deez-login.out
+
+          grep -q 'Signed in as sync-ci@example.com.' /tmp/deez-login.out
+          test -s /tmp/deez-auth-home/.config/deez/cloud.json
+          jq -e '.version == 1' /tmp/deez-auth-home/.config/deez/cloud.json >/dev/null
+          jq -e '.base_url == "http://127.0.0.1:18080"' /tmp/deez-auth-home/.config/deez/cloud.json >/dev/null
+          jq -e '.session | length > 0' /tmp/deez-auth-home/.config/deez/cloud.json >/dev/null
+
+          HOME=/tmp/deez-auth-home \
+          DEEZ_CLOUD_URL=http://127.0.0.1:18080 \
+          ./zig-out/bin/deez whoami | tee /tmp/deez-whoami.out
+          grep -q 'sync-ci@example.com' /tmp/deez-whoami.out
+          grep -q 'http://127.0.0.1:18080' /tmp/deez-whoami.out
+      - name: Cleanup
+        if: always()
+        shell: bash
+        run: |
+          test ! -f /tmp/deez-server.log || cat /tmp/deez-server.log
+          test ! -f /tmp/deez-relay.log || cat /tmp/deez-relay.log
+          test ! -f /tmp/deez-server.pid || kill "$(cat /tmp/deez-server.pid)" 2>/dev/null || true
+          test ! -f /tmp/deez-relay.pid || kill "$(cat /tmp/deez-relay.pid)" 2>/dev/null || true
+          docker rm -f deez-auth-mongo >/dev/null 2>&1 || true
