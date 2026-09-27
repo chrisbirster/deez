@@ -44,7 +44,16 @@ pub fn run(
     if (relay_token.len == 0) return error.MissingHostedAuthConfiguration;
 
     switch (store.*) {
-        .mongodb => |*mongo| {
+        .mongodb => {
+            // Hosted auth must not share the same RuntimeClient as deck/card
+            // storage. The web server may allow auth routes to bypass the
+            // storage request mutex so sign-in remains available while a long
+            // sync/import is running. A dedicated client keeps those MongoDB
+            // operations isolated and avoids concurrent use of one client.
+            const mongo_uri = init.environ_map.get("DEEZ_MONGO_URI") orelse return error.MissingMongoUri;
+            var auth_mongo = try storage.MongoStore.connect(init.io, init.gpa, mongo_uri);
+            defer auth_mongo.deinit();
+
             var sender: email_sender.Sender = .{ .relay = .{
                 .io = init.io,
                 .allocator = init.gpa,
@@ -54,7 +63,7 @@ pub fn run(
             var auth = hosted_auth.Service.init(
                 init.io,
                 init.gpa,
-                mongo,
+                &auth_mongo,
                 .{ .base_url = base_url },
                 &sender,
             );

@@ -8,11 +8,19 @@ const note_mutation = @import("note_mutation.zig");
 const storage = @import("storage/root.zig");
 
 const Io = std.Io;
+const max_bulk_notes: usize = 2048;
 
 const NoteInput = struct {
     note_type: []const u8,
     fields: []const []const u8,
     tags: []const []const u8,
+};
+
+const CreateNoteRequest = struct {
+    note_type: ?[]const u8 = null,
+    fields: ?[]const []const u8 = null,
+    tags: ?[]const []const u8 = null,
+    notes: ?[]const NoteInput = null,
 };
 
 const NoteResponse = struct {
@@ -134,6 +142,16 @@ fn parseInput(req: *httpz.Request, res: *httpz.Response) !?NoteInput {
     };
 }
 
+fn parseCreateRequest(req: *httpz.Request, res: *httpz.Response) !?CreateNoteRequest {
+    return req.json(CreateNoteRequest) catch {
+        try jsonError(res, 400, "invalid_json", "Request body must be a valid note input or bulk note request");
+        return null;
+    } orelse {
+        try jsonError(res, 400, "missing_body", "Request body is required");
+        return null;
+    };
+}
+
 fn tagsJson(allocator: std.mem.Allocator, tags: []const []const u8) ![]u8 {
     var out: std.Io.Writer.Allocating = .init(allocator);
     errdefer out.deinit();
@@ -247,6 +265,50 @@ fn generationResponse(generation: card_types.Generation) GenerationResponse {
     };
 }
 
+fn createOne(
+    store: *storage.Store,
+    res: *httpz.Response,
+    deck_id: u64,
+    input: NoteInput,
+    created_at_ms: i64,
+) !?content.NoteId {
+    const kind = content.BuiltInNoteType.parse(input.note_type) catch {
+        try jsonError(res, 400, "unknown_note_type", "Unsupported note type");
+        return null;
+    };
+    const tags_json = try tagsJson(res.arena, input.tags);
+    const generated = note_mutation.create(
+        res.arena,
+        store,
+        deck_id,
+        kind,
+        input.fields,
+        tags_json,
+        created_at_ms,
+    ) catch |err| {
+        if (isInvalidNoteError(err)) {
+            try invalidNote(res);
+            return null;
+        }
+        return err;
+    };
+    return generated.note_id;
+}
+
+fn rollbackCreated(
+    store: *storage.Store,
+    allocator: std.mem.Allocator,
+    deck_id: u64,
+    ids: []const content.NoteId,
+    timestamp_ms: i64,
+) void {
+    var index = ids.len;
+    while (index > 0) {
+        index -= 1;
+        note_mutation.delete(allocator, store, deck_id, ids[index], timestamp_ms) catch {};
+    }
+}
+
 pub fn createNote(
     store: *storage.Store,
     io: Io,
@@ -258,29 +320,59 @@ pub fn createNote(
         try jsonError(res, 404, "deck_not_found", "Deck not found");
         return;
     }
-    const input = (try parseInput(req, res)) orelse return;
-    const kind = content.BuiltInNoteType.parse(input.note_type) catch {
-        try jsonError(res, 400, "unknown_note_type", "Unsupported note type");
-        return;
-    };
-    const tags_json = try tagsJson(res.arena, input.tags);
-    const generated = note_mutation.create(
-        res.arena,
-        store,
-        deck_id,
-        kind,
-        input.fields,
-        tags_json,
-        nowMs(io),
-    ) catch |err| {
-        if (isInvalidNoteError(err)) {
-            try invalidNote(res);
+
+    const request = (try parseCreateRequest(req, res)) orelse return;
+    const timestamp_ms = nowMs(io);
+
+    if (request.notes) |notes| {
+        if (request.note_type != null or request.fields != null or request.tags != null) {
+            try jsonError(res, 400, "invalid_request", "Bulk note requests cannot include single-note fields");
             return;
         }
-        return err;
+        if (notes.len == 0 or notes.len > max_bulk_notes) {
+            try jsonError(res, 400, "invalid_bulk_size", "Bulk note requests must contain between 1 and 2048 notes");
+            return;
+        }
+
+        var created_ids: std.ArrayList(content.NoteId) = .empty;
+        var responses: std.ArrayList(NoteResponse) = .empty;
+        try created_ids.ensureTotalCapacity(res.arena, notes.len);
+        try responses.ensureTotalCapacity(res.arena, notes.len);
+
+        for (notes) |input| {
+            const note_id = (try createOne(store, res, deck_id, input, timestamp_ms)) orelse {
+                rollbackCreated(store, res.arena, deck_id, created_ids.items, timestamp_ms);
+                return;
+            };
+            try created_ids.append(res.arena, note_id);
+            const value = (try noteResponse(store, res, note_id)) orelse {
+                rollbackCreated(store, res.arena, deck_id, created_ids.items, timestamp_ms);
+                return error.NoteCreationLost;
+            };
+            try responses.append(res.arena, value);
+        }
+
+        res.status = 201;
+        try res.json(.{ .notes = responses.items }, .{});
+        return;
+    }
+
+    const note_type = request.note_type orelse {
+        try jsonError(res, 400, "invalid_request", "note_type is required");
+        return;
     };
+    const fields = request.fields orelse {
+        try jsonError(res, 400, "invalid_request", "fields are required");
+        return;
+    };
+    const input: NoteInput = .{
+        .note_type = note_type,
+        .fields = fields,
+        .tags = request.tags orelse &.{},
+    };
+    const note_id = (try createOne(store, res, deck_id, input, timestamp_ms)) orelse return;
     res.status = 201;
-    try writeNote(store, res, generated.note_id);
+    try writeNote(store, res, note_id);
 }
 
 pub fn updateNote(

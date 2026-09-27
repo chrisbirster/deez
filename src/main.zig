@@ -50,6 +50,19 @@ fn printHelp(init: std.process.Init, help: deez.thrawn_cli.Help) !void {
     try writeHelp(out, help);
 }
 
+fn isVersionCommand(args: []const []const u8) bool {
+    if (args.len != 2) return false;
+    return std.mem.eql(u8, args[1], "--version") or std.mem.eql(u8, args[1], "-V");
+}
+
+fn printVersion(init: std.process.Init) !void {
+    var stdout_buffer: [128]u8 = undefined;
+    var stdout_file_writer: Io.File.Writer = .init(.stdout(), init.io, &stdout_buffer);
+    const out = &stdout_file_writer.interface;
+    defer out.flush() catch {};
+    try out.print("deez {s}\n", .{deez.version});
+}
+
 fn isBackupUsageError(err: anyerror) bool {
     return switch (err) {
         error.InvalidArguments,
@@ -112,6 +125,11 @@ pub fn main(init: std.process.Init) !void {
     const args = try arena.alloc([]const u8, raw_args.len);
     for (raw_args, 0..) |arg, index| args[index] = arg;
 
+    if (isVersionCommand(args)) {
+        try printVersion(init);
+        return;
+    }
+
     if (deez.server.isCommand(args)) {
         deez.server.runCommand(init, args) catch |err|
             printRawErrorAndExit(init, err, deez.server.help_text);
@@ -122,6 +140,19 @@ pub fn main(init: std.process.Init) !void {
         deez.web_cli.run(init, args) catch |err| {
             switch (err) {
                 error.InvalidArguments, error.InvalidPort => printRawErrorAndExit(init, err, deez.web_cli.help_text),
+                else => return err,
+            }
+        };
+        return;
+    }
+
+    if (deez.remote_login.isCommand(args)) {
+        deez.remote_login.run(init, args) catch |err| {
+            switch (err) {
+                error.InvalidArguments,
+                error.InvalidMagicLink,
+                error.MissingCloudSession,
+                => printRawErrorAndExit(init, err, deez.remote_cli.help_text),
                 else => return err,
             }
         };
@@ -218,6 +249,15 @@ pub fn main(init: std.process.Init) !void {
             };
         },
     }
+}
+
+test "version command accepts long and short flags" {
+    const long = [_][]const u8{ "deez", "--version" };
+    const short = [_][]const u8{ "deez", "-V" };
+    const invalid = [_][]const u8{ "deez", "version" };
+    try std.testing.expect(isVersionCommand(&long));
+    try std.testing.expect(isVersionCommand(&short));
+    try std.testing.expect(!isVersionCommand(&invalid));
 }
 
 test {
