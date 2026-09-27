@@ -6,6 +6,7 @@ on:
       - build.zig
       - VERSION
       - scripts/build-termux-release.sh
+      - scripts/patch-zig-android-dns.py
       - .github/workflows/termux-smoke.yml
       - .github/workflows/release.yml
   workflow_dispatch:
@@ -51,3 +52,4 @@ jobs:
           test "$(readelf -h zig-out/bin/deez | awk '/Type:/{print $2}')" = "DYN"
           readelf -l zig-out/bin/deez | grep -q '/system/bin/linker64'
           readelf -d zig-out/bin/deez | grep -q 'Shared library: \[libc.so\]'
+          readelf -Ws zig-out/bin/deez | grep -Eq 'UND.*getaddrinfo'

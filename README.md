@@ -46,7 +46,7 @@ bundles SQLite, so Zig is not required on the phone.
 Install the CLI directly:
 
 ```bash
-VERSION=v0.2.0-rc.7
+VERSION=v0.2.0-rc.8
 curl -fL \
   "https://github.com/chrisbirster/deez/releases/download/${VERSION}/deez-aarch64-linux-android-termux" \
   -o "$PREFIX/bin/deez"
@@ -59,8 +59,10 @@ Web UI, download `deez-aarch64-linux-android-termux.tar.gz` and copy its
 `web/` directory to `$PREFIX/share/deez/web`.
 
 The release build fails CI unless the ELF is `ET_DYN`/PIE, requests
-`/system/bin/linker64`, and dynamically links Android/Bionic `libc.so`.
-This is required by current Android and Google Play Termux.
+`/system/bin/linker64`, dynamically links Android/Bionic `libc.so`, and
+routes DNS through Bionic `getaddrinfo()`. The DNS check is important because
+Zig 0.16's generic Linux resolver otherwise bypasses Android's netd-backed DNS
+configuration.
 
 ## First-run storage setup
 
