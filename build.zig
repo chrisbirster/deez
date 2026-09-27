@@ -36,7 +36,23 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .link_libc = true,
     });
-    mod.linkSystemLibrary("sqlite3", .{});
+    const bundled_sqlite = b.option(
+        []const u8,
+        "bundled-sqlite",
+        "Path relative to the repository root containing sqlite3.c and sqlite3.h",
+    );
+    if (bundled_sqlite) |sqlite_dir| {
+        mod.addIncludePath(b.path(sqlite_dir));
+        mod.addCSourceFile(.{
+            .file = b.path(b.pathJoin(&.{ sqlite_dir, "sqlite3.c" })),
+            .flags = &.{
+                "-DSQLITE_THREADSAFE=1",
+                "-DSQLITE_OMIT_LOAD_EXTENSION",
+            },
+        });
+    } else {
+        mod.linkSystemLibrary("sqlite3", .{});
+    }
     mod.addImport("bongo", bongo_dependency.module("bongo"));
     mod.addImport("thrawn", thrawn_dependency.module("thrawn"));
     mod.addImport("httpz", httpz_dependency.module("httpz"));
