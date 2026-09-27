@@ -29,7 +29,12 @@ fi
 rm -rf "$WORK_DIR"
 mkdir -p "$WORK_DIR"
 
-ZIG_LIB_DIR="$(zig env | python3 -c 'import json,sys; print(json.load(sys.stdin)["lib_dir"])')"
+ZIG_EXE="$(readlink -f "$(command -v zig)")"
+ZIG_LIB_DIR="$(dirname "$ZIG_EXE")/lib"
+if [[ ! -d "$ZIG_LIB_DIR/std" ]]; then
+  # Zig 0.16 prints `zig env` as ZON rather than JSON.
+  ZIG_LIB_DIR="$(zig env | sed -n 's/^[[:space:]]*\\.lib_dir = "\\(.*\\)",$/\\1/p' | head -n 1)"
+fi
 test -d "$ZIG_LIB_DIR/std"
 cp -a "$ZIG_LIB_DIR" "$PATCHED_ZIG_LIB"
 python3 scripts/patch-zig-android-dns.py "$PATCHED_ZIG_LIB/std/Io/Threaded.zig"
