@@ -36,6 +36,35 @@ brew update
 brew upgrade deez
 ```
 
+
+## Install on Termux (Android ARM64)
+
+Tagged releases also publish a self-contained ARM64 build for Termux. It uses
+musl and bundles SQLite, so Zig is not required on the phone.
+
+For the current release candidate:
+
+```bash
+VERSION=v0.2.0-rc.6
+tmp=$(mktemp -d)
+cd "$tmp"
+
+curl -fL \
+  "https://github.com/chrisbirster/deez/releases/download/${VERSION}/deez-aarch64-linux-musl-termux.tar.gz" \
+  -o deez.tar.gz
+
+tar -xzf deez.tar.gz
+install -m 755 deez "$PREFIX/bin/deez"
+mkdir -p "$PREFIX/share/deez"
+rm -rf "$PREFIX/share/deez/web"
+cp -R web "$PREFIX/share/deez/web"
+
+deez --help
+```
+
+The release artifact is smoke-tested as an ARM64 static executable and with a
+real SQLite database before publication.
+
 ## First-run storage setup
 
 The first command that needs persistent storage asks which backend to use:
