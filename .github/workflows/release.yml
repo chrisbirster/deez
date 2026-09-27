@@ -224,7 +224,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/download-artifact@v4
         with:
-          pattern: deez-*.tar.gz
+          pattern: deez-*
           path: dist
           merge-multiple: true
 
@@ -232,6 +232,7 @@ jobs:
         id: checksums
         shell: bash
         run: |
+          ls -lah dist
           ARM_SHA=$(sha256sum dist/deez-aarch64-apple-darwin.tar.gz | awk '{print $1}')
           INTEL_SHA=$(sha256sum dist/deez-x86_64-apple-darwin.tar.gz | awk '{print $1}')
           TERMUX_BIN_SHA=$(sha256sum dist/deez-aarch64-linux-android-termux | awk '{print $1}')
