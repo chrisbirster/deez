@@ -39,31 +39,28 @@ brew upgrade deez
 
 ## Install on Termux (Android ARM64)
 
-Tagged releases also publish a self-contained ARM64 build for Termux. It uses
-musl and bundles SQLite, so Zig is not required on the phone.
+Tagged releases publish an Android/Bionic ARM64 executable built specifically
+for Termux. It is a PIE executable using Android's `/system/bin/linker64` and
+bundles SQLite, so Zig is not required on the phone.
 
-For the current release candidate:
+Install the CLI directly:
 
 ```bash
-VERSION=v0.2.0-rc.6
-tmp=$(mktemp -d)
-cd "$tmp"
-
+VERSION=v0.2.0-rc.7
 curl -fL \
-  "https://github.com/chrisbirster/deez/releases/download/${VERSION}/deez-aarch64-linux-musl-termux.tar.gz" \
-  -o deez.tar.gz
-
-tar -xzf deez.tar.gz
-install -m 755 deez "$PREFIX/bin/deez"
-mkdir -p "$PREFIX/share/deez"
-rm -rf "$PREFIX/share/deez/web"
-cp -R web "$PREFIX/share/deez/web"
-
+  "https://github.com/chrisbirster/deez/releases/download/${VERSION}/deez-aarch64-linux-android-termux" \
+  -o "$PREFIX/bin/deez"
+chmod +x "$PREFIX/bin/deez"
 deez --help
 ```
 
-The release artifact is smoke-tested as an ARM64 static executable and with a
-real SQLite database before publication.
+The raw binary is enough for terminal study. If you also want the bundled local
+Web UI, download `deez-aarch64-linux-android-termux.tar.gz` and copy its
+`web/` directory to `$PREFIX/share/deez/web`.
+
+The release build fails CI unless the ELF is `ET_DYN`/PIE, requests
+`/system/bin/linker64`, and dynamically links Android/Bionic `libc.so`.
+This is required by current Android and Google Play Termux.
 
 ## First-run storage setup
 

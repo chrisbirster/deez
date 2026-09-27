@@ -153,51 +153,62 @@ jobs:
           if-no-files-found: error
 
 
+
   build-termux:
     needs:
       - prepare
       - web-assets
     if: needs.prepare.outputs.should_release == 'true'
     runs-on: ubuntu-latest
+    env:
+      ANDROID_NDK_VERSION: "29.0.14206865"
+      ANDROID_API_LEVEL: "24"
     steps:
       - uses: actions/checkout@v4
       - uses: mlugg/setup-zig@v2
         with:
           version: 0.16.0
-      - name: Install ARM64 smoke-test tools
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: ''
+      - name: Install Android NDK
+        run: sdkmanager --install "ndk;${ANDROID_NDK_VERSION}"
+      - name: Install validation tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y file qemu-user-static unzip openssl
-      - name: Build Termux-compatible ARM64 release binary
+          sudo apt-get install -y file unzip openssl binutils
+      - name: Build Android/Bionic ARM64 release binary
+        env:
+          ANDROID_NDK_ROOT: ${{ env.ANDROID_SDK_ROOT }}/ndk/${{ env.ANDROID_NDK_VERSION }}
         run: ./scripts/build-termux-release.sh
-      - name: Smoke test ARM64 binary under QEMU
+      - name: Assemble Termux package
         shell: bash
         run: |
           set -euo pipefail
-          qemu-aarch64-static ./zig-out/bin/deez --help >/dev/null
-
-          tmp=$(mktemp -d)
-          trap 'rm -rf "$tmp"' EXIT
-          DEEZ_STORAGE=sqlite DEEZ_DB="$tmp/deez.db" \
-            qemu-aarch64-static ./zig-out/bin/deez decks >/dev/null
-      - name: Assemble portable package
-        shell: bash
-        run: |
           mkdir -p dist/package
           cp zig-out/bin/deez dist/package/deez
+          cp zig-out/bin/deez dist/deez-aarch64-linux-android-termux
       - name: Download Deez Web bundle
         uses: actions/download-artifact@v4
         with:
           name: deez-web-dist
           path: dist/package/web
-      - name: Package Termux release
+      - name: Package binary and web assets
         shell: bash
         run: |
-          tar -C dist/package -czf dist/deez-aarch64-linux-musl-termux.tar.gz deez web
+          tar -C dist/package -czf dist/deez-aarch64-linux-android-termux.tar.gz deez web
       - uses: actions/upload-artifact@v4
         with:
-          name: deez-aarch64-linux-musl-termux.tar.gz
-          path: dist/deez-aarch64-linux-musl-termux.tar.gz
+          name: deez-termux-release
+          path: |
+            dist/deez-aarch64-linux-android-termux
+            dist/deez-aarch64-linux-android-termux.tar.gz
           if-no-files-found: error
 
   publish:
@@ -223,13 +234,16 @@ jobs:
         run: |
           ARM_SHA=$(sha256sum dist/deez-aarch64-apple-darwin.tar.gz | awk '{print $1}')
           INTEL_SHA=$(sha256sum dist/deez-x86_64-apple-darwin.tar.gz | awk '{print $1}')
-          TERMUX_SHA=$(sha256sum dist/deez-aarch64-linux-musl-termux.tar.gz | awk '{print $1}')
+          TERMUX_BIN_SHA=$(sha256sum dist/deez-aarch64-linux-android-termux | awk '{print $1}')
+          TERMUX_TAR_SHA=$(sha256sum dist/deez-aarch64-linux-android-termux.tar.gz | awk '{print $1}')
           echo "arm_sha=${ARM_SHA}" >> "$GITHUB_OUTPUT"
           echo "intel_sha=${INTEL_SHA}" >> "$GITHUB_OUTPUT"
-          echo "termux_sha=${TERMUX_SHA}" >> "$GITHUB_OUTPUT"
+          echo "termux_bin_sha=${TERMUX_BIN_SHA}" >> "$GITHUB_OUTPUT"
+          echo "termux_tar_sha=${TERMUX_TAR_SHA}" >> "$GITHUB_OUTPUT"
           printf '%s  %s\n' "$ARM_SHA" deez-aarch64-apple-darwin.tar.gz > dist/SHA256SUMS
           printf '%s  %s\n' "$INTEL_SHA" deez-x86_64-apple-darwin.tar.gz >> dist/SHA256SUMS
-          printf '%s  %s\n' "$TERMUX_SHA" deez-aarch64-linux-musl-termux.tar.gz >> dist/SHA256SUMS
+          printf '%s  %s\n' "$TERMUX_BIN_SHA" deez-aarch64-linux-android-termux >> dist/SHA256SUMS
+          printf '%s  %s\n' "$TERMUX_TAR_SHA" deez-aarch64-linux-android-termux.tar.gz >> dist/SHA256SUMS
           cat dist/SHA256SUMS
 
       - name: Create release tag from main
@@ -253,7 +267,8 @@ jobs:
           files: |
             dist/deez-aarch64-apple-darwin.tar.gz
             dist/deez-x86_64-apple-darwin.tar.gz
-            dist/deez-aarch64-linux-musl-termux.tar.gz
+            dist/deez-aarch64-linux-android-termux
+            dist/deez-aarch64-linux-android-termux.tar.gz
             dist/SHA256SUMS
 
       - name: Update Homebrew formula on main
