@@ -70,6 +70,12 @@ pub fn build(b: *std.Build) void {
             },
         }),
     });
+    // Android's loader (and Google Play Termux's libtermux-exec) requires
+    // position-independent executables. Make the requirement explicit instead
+    // of relying on target defaults.
+    if (target.result.abi == .android) {
+        exe.pie = true;
+    }
     b.installArtifact(exe);
 
     // The PWA executes the exact same FSRS-7 implementation as the native CLI.

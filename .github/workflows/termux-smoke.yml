@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - build.zig
+      - VERSION
       - scripts/build-termux-release.sh
       - .github/workflows/termux-smoke.yml
       - .github/workflows/release.yml
@@ -11,6 +12,10 @@ on:
 
 permissions:
   contents: read
+
+env:
+  ANDROID_NDK_VERSION: "29.0.14206865"
+  ANDROID_API_LEVEL: "24"
 
 jobs:
   termux-arm64:
@@ -20,19 +25,29 @@ jobs:
       - uses: mlugg/setup-zig@v2
         with:
           version: 0.16.0
-      - name: Install ARM64 smoke-test tools
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: ''
+      - name: Install Android NDK
+        run: sdkmanager --install "ndk;${ANDROID_NDK_VERSION}"
+      - name: Install validation tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y file qemu-user-static unzip openssl
-      - name: Build Termux-compatible ARM64 binary
+          sudo apt-get install -y file unzip openssl binutils
+      - name: Build Android/Bionic ARM64 binary
+        env:
+          ANDROID_NDK_ROOT: ${{ env.ANDROID_SDK_ROOT }}/ndk/${{ env.ANDROID_NDK_VERSION }}
         run: ./scripts/build-termux-release.sh
-      - name: Verify CLI and SQLite under ARM64 QEMU
+      - name: Verify Google Play Termux ELF contract
         shell: bash
         run: |
           set -euo pipefail
-          qemu-aarch64-static ./zig-out/bin/deez --help >/dev/null
-
-          tmp=$(mktemp -d)
-          trap 'rm -rf "$tmp"' EXIT
-          DEEZ_STORAGE=sqlite DEEZ_DB="$tmp/deez.db" \
-            qemu-aarch64-static ./zig-out/bin/deez decks >/dev/null
+          test "$(readelf -h zig-out/bin/deez | awk '/Type:/{print $2}')" = "DYN"
+          readelf -l zig-out/bin/deez | grep -q '/system/bin/linker64'
+          readelf -d zig-out/bin/deez | grep -q 'Shared library: \[libc.so\]'
