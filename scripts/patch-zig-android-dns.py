@@ -26,8 +26,8 @@ if next_fn < 0:
     next_fn = len(source)
 
 section = source[fn_start:next_fn]
-old = "if (native_os == .linux) {"
-new = "if (native_os == .linux and builtin.target.abi != .android) {"
+old = "if (native_os == .linux or is_windows) {"
+new = "if ((native_os == .linux and builtin.target.abi != .android) or is_windows) {"
 
 if new in section:
     print(f"{path}: Android DNS patch already applied")
@@ -40,7 +40,7 @@ if count != 1:
         if "native_os" in line or "lookup" in line.lower() or "getaddrinfo" in line
     )
     raise SystemExit(
-        f"{path}: expected one Linux resolver branch in netLookupFallible, "
+        f"{path}: expected one Linux/Windows resolver branch in netLookupFallible, "
         f"found {count}\nRelevant lines:\n{preview}"
     )
 
