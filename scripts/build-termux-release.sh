@@ -13,6 +13,7 @@ ANDROID_NDK_ROOT="${ANDROID_NDK_ROOT:-${ANDROID_NDK_HOME:-}}"
 WORK_DIR=".termux-build"
 SQLITE_DIR="$WORK_DIR/sqlite-amalgamation-$SQLITE_CODE"
 LIBC_FILE="$WORK_DIR/android-libc-aarch64.txt"
+PATCHED_ZIG_LIB="$WORK_DIR/zig-lib"
 
 if [[ -z "$ANDROID_NDK_ROOT" ]]; then
   echo "ANDROID_NDK_ROOT or ANDROID_NDK_HOME must point at an Android NDK" >&2
@@ -27,6 +28,16 @@ fi
 
 rm -rf "$WORK_DIR"
 mkdir -p "$WORK_DIR"
+
+ZIG_EXE="$(readlink -f "$(command -v zig)")"
+ZIG_LIB_DIR="$(dirname "$ZIG_EXE")/lib"
+if [[ ! -d "$ZIG_LIB_DIR/std" ]]; then
+  # Zig 0.16 prints `zig env` as ZON rather than JSON.
+  ZIG_LIB_DIR="$(zig env | sed -n 's/^[[:space:]]*\\.lib_dir = "\\(.*\\)",$/\\1/p' | head -n 1)"
+fi
+test -d "$ZIG_LIB_DIR/std"
+cp -a "$ZIG_LIB_DIR" "$PATCHED_ZIG_LIB"
+python3 scripts/patch-zig-android-dns.py "$PATCHED_ZIG_LIB/std/Io/Threaded.zig"
 
 curl -fsSL \
   "https://www.sqlite.org/$SQLITE_YEAR/sqlite-amalgamation-$SQLITE_CODE.zip" \
@@ -57,7 +68,8 @@ zig build \
   -Dtarget="aarch64-linux-android.$ANDROID_API_LEVEL" \
   -Doptimize=ReleaseFast \
   -Dbundled-sqlite="$SQLITE_DIR" \
-  --libc "$LIBC_FILE"
+  --libc "$LIBC_FILE" \
+  --zig-lib-dir "$PATCHED_ZIG_LIB"
 
 file zig-out/bin/deez
 
@@ -77,5 +89,12 @@ fi
 if ! readelf -d zig-out/bin/deez | grep -q 'Shared library: \[libc.so\]'; then
   echo "Termux release must link Android/Bionic libc dynamically" >&2
   readelf -d zig-out/bin/deez >&2
+  exit 1
+fi
+
+
+if ! readelf -Ws zig-out/bin/deez | grep -Eq 'UND.*getaddrinfo'; then
+  echo "Termux release must resolve DNS through Android/Bionic getaddrinfo" >&2
+  readelf -Ws zig-out/bin/deez | grep -E 'getaddrinfo|getnameinfo' >&2 || true
   exit 1
 fi
